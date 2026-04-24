@@ -1,9 +1,17 @@
-# ⚡ blastr
+<p align="center">
+  <img src="assets/logo.png" alt="blastr logo" width="260"/>
+</p>
 
-Telegram-native token launcher built on the [Printr](https://printr.money) API.
-Multi-chain launches in a few taps, without ever leaving Telegram.
+<h1 align="center">⚡ blastr</h1>
 
-**Try it:** [@printrblasterbot](https://t.me/printrblasterbot)
+<p align="center">
+  Telegram-native token launcher built on the <a href="https://printr.money">Printr</a> API.<br/>
+  Multi-chain launches in a few taps, without ever leaving Telegram.
+</p>
+
+<p align="center">
+  <a href="https://t.me/printrblasterbot"><b>Try it → @printrblasterbot</b></a>
+</p>
 
 ---
 
