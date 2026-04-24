@@ -1,0 +1,380 @@
+import { Scenes } from 'telegraf';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import type { BotContext } from '../context.js';
+import { printr, PrintrApiError } from '../../printr/client.js';
+import { getChain } from '../../printr/chains.js';
+import {
+  signAndSubmitEvm,
+  signAndSubmitSvm,
+  type EvmSubmitResult,
+  type SvmPayload,
+} from '../../printr/signer.js';
+import { walletStore } from '../../store/wallets.js';
+import { presetStore } from '../../store/presets.js';
+import type { EvmPayload } from '../../printr/types.js';
+import {
+  confirmKeyboard,
+  mainMenuKeyboard,
+  socialsPromptKeyboard,
+} from '../keyboards.js';
+import {
+  formatQuote,
+  formatLaunchSummary,
+  formatTokenCreated,
+  formatTxResult,
+  esc,
+} from '../format.js';
+import { cleanSend, deleteUserMsg } from '../helpers.js';
+import { appendBlastrTag } from '../signature.js';
+import { parseSocials, cleanExternalLinks, SOCIALS_PROMPT } from '../socials.js';
+import { config } from '../../config.js';
+import {
+  startCommand,
+  helpCommand,
+  walletDashboard,
+} from '../commands.js';
+import { logger } from '../../logger.js';
+
+function getText(ctx: BotContext): string | undefined {
+  return ctx.message && 'text' in ctx.message ? ctx.message.text : undefined;
+}
+
+function getCbData(ctx: BotContext): string | undefined {
+  return ctx.callbackQuery && 'data' in ctx.callbackQuery ? ctx.callbackQuery.data : undefined;
+}
+
+function skipButton() {
+  return {
+    reply_markup: { inline_keyboard: [[{ text: 'Skip', callback_data: 'skip' }]] },
+  };
+}
+
+// ── Step 0: Name ──
+async function receiveName(ctx: BotContext) {
+  const text = getText(ctx);
+  if (!text) return;
+  if (text.length < 1 || text.length > 32) {
+    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:');
+    return;
+  }
+  ctx.session.launch.name = text;
+  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars)</i>');
+  return ctx.wizard.next();
+}
+
+// ── Step 1: Ticker ──
+async function receiveSymbol(ctx: BotContext) {
+  const text = getText(ctx);
+  if (!text) return;
+  if (text.length < 1 || text.length > 10) {
+    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:');
+    return;
+  }
+  ctx.session.launch.symbol = text.toUpperCase();
+  await cleanSend(
+    ctx,
+    '🖼 <b>Token Image</b>\n\nSend a photo for your token logo <i>(JPEG or PNG, max 4MB)</i>.\n\nTap <b>Skip</b> to launch without an image.',
+    skipButton(),
+  );
+  return ctx.wizard.next();
+}
+
+// ── Step 2: Image ──
+async function receiveImage(ctx: BotContext) {
+  const data = getCbData(ctx);
+  if (data === 'skip') {
+    await ctx.answerCbQuery().catch(() => {});
+    ctx.session.launch.image = '';
+  } else if (ctx.message && 'photo' in ctx.message && ctx.message.photo.length > 0) {
+    const photo = ctx.message.photo[ctx.message.photo.length - 1];
+    try {
+      const fileLink = await ctx.telegram.getFileLink(photo.file_id);
+      const res = await fetch(fileLink.href);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      ctx.session.launch.image = buffer.toString('base64');
+      await deleteUserMsg(ctx);
+    } catch {
+      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton());
+      return;
+    }
+  } else if (
+    ctx.message &&
+    'document' in ctx.message &&
+    ctx.message.document?.mime_type?.startsWith('image/')
+  ) {
+    try {
+      const fileLink = await ctx.telegram.getFileLink(ctx.message.document.file_id);
+      const res = await fetch(fileLink.href);
+      const buffer = Buffer.from(await res.arrayBuffer());
+      ctx.session.launch.image = buffer.toString('base64');
+      await deleteUserMsg(ctx);
+    } catch {
+      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton());
+      return;
+    }
+  } else {
+    return;
+  }
+
+  await cleanSend(ctx, SOCIALS_PROMPT, socialsPromptKeyboard());
+  return ctx.wizard.next();
+}
+
+// ── Step 3: Socials, then summary + confirm ──
+async function receiveSocials(ctx: BotContext) {
+  const data = getCbData(ctx);
+  const text = getText(ctx);
+  if (data === 'skip') {
+    await ctx.answerCbQuery().catch(() => {});
+    ctx.session.launch.externalLinks = {};
+  } else if (text) {
+    ctx.session.launch.externalLinks = parseSocials(text);
+  } else {
+    return;
+  }
+  return showQuoteAndConfirm(ctx);
+}
+
+async function showQuoteAndConfirm(ctx: BotContext) {
+  const userId = ctx.from!.id.toString();
+  const preset = await presetStore.get(userId);
+  const launch = ctx.session.launch;
+
+  const initialBuy =
+    preset.initialBuyUsd > 0
+      ? { spend_usd: preset.initialBuyUsd }
+      : { spend_usd: 0.01 };
+
+  const quoteBody = {
+    chains: preset.chains,
+    initial_buy: initialBuy,
+    graduation_threshold_per_chain_usd: preset.graduationThreshold,
+    custom_fees: {
+      bonding_curve_dev_fee_bps: preset.bondingCurveDevFeeBps,
+      amm_dev_fee_bps: preset.ammDevFeeBps,
+    },
+    fee_sink: preset.feeSink,
+    telecoin_supply_on_curve_ratio_bps: preset.supplyOnCurveBps,
+    max_telecoin_supply: preset.maxSupply,
+  };
+
+  const hasSolana = preset.chains.some((c) => c.startsWith('solana:'));
+  const hasEvm = preset.chains.some((c) => !c.startsWith('solana:'));
+  const feeLines: string[] = [];
+  if (hasSolana && config.blastrFeeRecipientSvm && config.blastrFeeSol > 0) {
+    feeLines.push(`${config.blastrFeeSol} SOL`);
+  }
+  if (hasEvm && config.blastrFeeRecipientEvm && BigInt(config.blastrFeeWei) > 0n) {
+    const eth = Number(BigInt(config.blastrFeeWei)) / 1e18;
+    feeLines.push(`${eth} native (EVM)`);
+  }
+  const blastrFeeLabel = feeLines.length > 0 ? feeLines.join(' + ') : undefined;
+
+  const summary = formatLaunchSummary({
+    name: launch.name!,
+    symbol: launch.symbol!,
+    description: appendBlastrTag(launch.description),
+    chains: preset.chains,
+    initialBuyUsd: preset.initialBuyUsd,
+    graduationThreshold: preset.graduationThreshold,
+    hasImage: !!launch.image,
+    maxSupply: preset.maxSupply,
+    supplyOnCurveBps: preset.supplyOnCurveBps,
+    bondingCurveDevFeeBps: preset.bondingCurveDevFeeBps,
+    ammDevFeeBps: preset.ammDevFeeBps,
+    feeSink: preset.feeSink,
+    profile: preset.profile,
+    externalLinks: cleanExternalLinks(launch.externalLinks),
+    blastrFeeLabel,
+  });
+
+  try {
+    const quote = await printr.quote(quoteBody);
+    await cleanSend(
+      ctx,
+      `⚡ <b>Quick Launch</b>\n\n${summary}\n\n${formatQuote(quote)}\n\n<b>Confirm launch?</b>`,
+      confirmKeyboard(),
+    );
+  } catch (err) {
+    const msg = err instanceof PrintrApiError ? `API: ${err.detail}` : 'Could not fetch quote';
+    await cleanSend(
+      ctx,
+      `⚡ <b>Quick Launch</b>\n\n${summary}\n\n⚠️ ${esc(msg)}\n\n<b>Launch anyway?</b>`,
+      confirmKeyboard(),
+    );
+  }
+  return ctx.wizard.next();
+}
+
+// ── Step 4: Confirm & create ──
+async function handleConfirm(ctx: BotContext) {
+  const data = getCbData(ctx);
+  if (!data) return;
+  await ctx.answerCbQuery().catch(() => {});
+
+  if (data === 'confirm:no') {
+    await cleanSend(ctx, 'Launch cancelled.', mainMenuKeyboard());
+    return ctx.scene.leave();
+  }
+  if (data !== 'confirm:yes') return;
+
+  const userId = ctx.from!.id.toString();
+  const preset = await presetStore.get(userId);
+  const launch = ctx.session.launch;
+  const chains = preset.chains;
+  const userWallets = await walletStore.getUserWallets(userId);
+  const evmWallet = userWallets.wallets.find((w) => w.type === 'evm');
+  const svmWallet = userWallets.wallets.find((w) => w.type === 'svm');
+  const defaultWallet = await walletStore.getDefaultWallet(userId);
+
+  const creatorAccounts = chains.map((chainCaip2) => {
+    const chain = getChain(chainCaip2);
+    if (chain?.type === 'svm' && svmWallet) return `${chainCaip2}:${svmWallet.address}`;
+    if (chain?.type === 'evm' && evmWallet) return `${chainCaip2}:${evmWallet.address}`;
+    return `${chainCaip2}:${defaultWallet?.address ?? ''}`;
+  });
+
+  const initialBuy =
+    preset.initialBuyUsd > 0
+      ? { spend_usd: preset.initialBuyUsd }
+      : { spend_usd: 0.01 };
+
+  await cleanSend(ctx, '⚡ Creating token on Printr...');
+
+  try {
+    const result = await printr.createToken({
+      creator_accounts: creatorAccounts,
+      name: launch.name!,
+      symbol: launch.symbol!,
+      description: appendBlastrTag(launch.description),
+      image: launch.image || undefined,
+      chains,
+      initial_buy: initialBuy,
+      graduation_threshold_per_chain_usd: preset.graduationThreshold,
+      external_links: cleanExternalLinks(launch.externalLinks),
+      custom_fees: {
+        bonding_curve_dev_fee_bps: preset.bondingCurveDevFeeBps,
+        amm_dev_fee_bps: preset.ammDevFeeBps,
+      },
+      fee_sink: preset.feeSink,
+      telecoin_supply_on_curve_ratio_bps: preset.supplyOnCurveBps,
+      max_telecoin_supply: preset.maxSupply,
+    });
+
+    const appUrl = config.printrBaseUrl.replace('api-preview', 'app');
+    const tokenMsg = formatTokenCreated(result.token_id, appUrl);
+    const payload = result.payload;
+
+    const hasSolana = chains.some((c) => c.startsWith('solana:'));
+    const hasEvm = chains.some((c) => !c.startsWith('solana:'));
+
+    let signed = false;
+
+    if (hasSolana && svmWallet && (payload as unknown as SvmPayload).ixs) {
+      await cleanSend(ctx, `${tokenMsg}\n\n⏳ Signing Solana transaction...`);
+      try {
+        const key = await walletStore.decryptKey(userId, svmWallet.id);
+        const svmFee =
+          config.blastrFeeRecipientSvm && config.blastrFeeSol > 0
+            ? {
+                recipient: config.blastrFeeRecipientSvm,
+                lamports: Math.round(config.blastrFeeSol * LAMPORTS_PER_SOL),
+              }
+            : undefined;
+        const svmResult = await signAndSubmitSvm(payload as unknown as SvmPayload, key, undefined, svmFee);
+        await cleanSend(
+          ctx,
+          `${tokenMsg}\n\n<b>📡 Transaction Submitted</b>\n` +
+            `<b>Signature:</b> <code>${svmResult.signature}</code>\n` +
+            `<b>Status:</b> ${svmResult.confirmation_status}`,
+          mainMenuKeyboard(),
+        );
+        signed = true;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : 'Unknown error';
+        logger.error({ err, userId, chain: 'svm', flow: 'quickLaunch' }, 'sign failed');
+        await cleanSend(ctx, `${tokenMsg}\n\n❌ Solana signing failed: ${esc(errMsg)}`, mainMenuKeyboard());
+        signed = true;
+      }
+    }
+
+    if (hasEvm && evmWallet && (payload as unknown as EvmPayload).calldata) {
+      await cleanSend(ctx, `${tokenMsg}\n\n⏳ Signing EVM transaction...`);
+      try {
+        const key = await walletStore.decryptKey(userId, evmWallet.id);
+        const evmFee =
+          config.blastrFeeRecipientEvm && BigInt(config.blastrFeeWei) > 0n
+            ? { recipient: config.blastrFeeRecipientEvm, wei: config.blastrFeeWei }
+            : undefined;
+        const evmResult = await signAndSubmitEvm(payload as unknown as EvmPayload, key, undefined, evmFee);
+        await cleanSend(
+          ctx,
+          `${tokenMsg}\n\n${formatTxResult(evmResult.tx_hash, evmResult.tx_status)}`,
+          mainMenuKeyboard(),
+        );
+        signed = true;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : 'Unknown error';
+        logger.error({ err, userId, chain: 'evm', flow: 'quickLaunch' }, 'sign failed');
+        await cleanSend(ctx, `${tokenMsg}\n\n❌ EVM signing failed: ${esc(errMsg)}`, mainMenuKeyboard());
+        signed = true;
+      }
+    }
+
+    if (!signed) {
+      await cleanSend(
+        ctx,
+        `${tokenMsg}\n\n⚠️ Could not auto-sign. Your wallet doesn't match the preset's chain(s) — update Settings or add the right wallet.`,
+        mainMenuKeyboard(),
+      );
+    }
+  } catch (err) {
+    const detail = err instanceof PrintrApiError ? err.detail : err instanceof Error ? err.message : '';
+    if (/temporarily reserved/i.test(detail)) {
+      const ticker = detail.match(/ticker "([^"]+)"/)?.[1] ?? launch.symbol;
+      await cleanSend(
+        ctx,
+        `🛡 <b>Anti-Vamp Protection</b>\n\n` +
+          `The ticker <b>${esc(ticker!)}</b> is reserved by another token launched in the last 48 hours.\n\n` +
+          `Try again with a different ticker.`,
+        mainMenuKeyboard(),
+      );
+    } else {
+      await cleanSend(ctx, `❌ Launch failed: ${esc(detail || 'Unknown error')}`, mainMenuKeyboard());
+    }
+  }
+  return ctx.scene.leave();
+}
+
+// ── Scene ──
+
+export const quickLaunchScene = new Scenes.WizardScene<BotContext>(
+  'quickLaunch',
+  receiveName,     // 0
+  receiveSymbol,   // 1
+  receiveImage,    // 2
+  receiveSocials,  // 3
+  handleConfirm,   // 4
+);
+
+quickLaunchScene.enter(async (ctx) => {
+  ctx.session.launch = { chains: [] };
+  await cleanSend(
+    ctx,
+    '⚡ <b>Quick Launch</b>\n\nUses your saved Quick Launch preset. ' +
+      'Adjust defaults anytime via <b>⚙️ Settings</b>.\n\n' +
+      'What should your token be called? <i>(1-32 characters)</i>',
+  );
+});
+
+quickLaunchScene.command('cancel', async (ctx) => {
+  await cleanSend(ctx, 'Launch cancelled.', mainMenuKeyboard());
+  return ctx.scene.leave();
+});
+quickLaunchScene.command('start', async (ctx) => { await ctx.scene.leave(); return startCommand(ctx); });
+quickLaunchScene.command('wallet', async (ctx) => { await ctx.scene.leave(); return walletDashboard(ctx); });
+quickLaunchScene.command('help', async (ctx) => { await ctx.scene.leave(); return helpCommand(ctx); });
+
+quickLaunchScene.action('action:wallet', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await ctx.scene.leave(); return walletDashboard(ctx); });
+quickLaunchScene.action('action:start', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await ctx.scene.leave(); return startCommand(ctx); });
+quickLaunchScene.action('action:help', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await ctx.scene.leave(); return helpCommand(ctx); });

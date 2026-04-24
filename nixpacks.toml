@@ -1,0 +1,5 @@
+# Pin Node 22 LTS for predictable production runtime.
+# Build runs `npm ci && npm run build`; start runs `npm run start`
+# (these are derived from package.json automatically by Nixpacks).
+[phases.setup]
+nixPkgs = ["nodejs_22", "npm-9_x"]
