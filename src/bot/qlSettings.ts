@@ -15,12 +15,15 @@ import {
   qlAmmFeeKeyboard,
   qlFeeSinkKeyboard,
   qlProfileKeyboard,
+  qlAutoStakeKeyboard,
+  qlStakeLockKeyboard,
 } from './keyboards.js';
+import type { LockPeriodDays } from '../printr/stake.js';
 
 async function summary(userId: string): Promise<string> {
   const p = await presetStore.get(userId);
   const chains = p.chains.map(chainLabel).join(', ') || '—';
-  return [
+  const lines = [
     '⚙️ <b>Quick Launch Settings</b>',
     '',
     `<b>Chain(s):</b> ${chains}`,
@@ -31,16 +34,21 @@ async function summary(userId: string): Promise<string> {
     `<b>Curve Dev Fee:</b> ${(p.bondingCurveDevFeeBps / 100).toFixed(2)}%`,
     `<b>AMM Dev Fee:</b> ${(p.ammDevFeeBps / 100).toFixed(2)}%`,
     `<b>Fee Sink:</b> ${SINK_LABEL[p.feeSink] ?? p.feeSink}`,
-    `<b>Profile:</b> ${esc(p.profile)}`,
-    '',
-    'Pick a field to edit:',
-  ].join('\n');
+  ];
+  if (p.feeSink === 'stake_pool') {
+    lines.push(`<b>Auto-Stake Initial:</b> ${p.autoStakeInitial ? 'on' : 'off'}`);
+    lines.push(`<b>Stake Lock:</b> ${p.stakeLockPeriod}d`);
+  }
+  lines.push(`<b>Profile:</b> ${esc(p.profile)}`);
+  lines.push('', 'Pick a field to edit:');
+  return lines.join('\n');
 }
 
 export async function qlSettingsDashboard(ctx: BotContext) {
   ctx.session._qlSettingsEdit = false;
   const userId = ctx.from!.id.toString();
-  await cleanSend(ctx, await summary(userId), qlSettingsMenuKeyboard());
+  const preset = await presetStore.get(userId);
+  await cleanSend(ctx, await summary(userId), qlSettingsMenuKeyboard(preset));
 }
 
 /**
@@ -51,7 +59,7 @@ export async function handleQlSettingsCallback(ctx: BotContext, data: string): P
 
   if (data === 'qls:reset') {
     await presetStore.reset(userId);
-    await cleanSend(ctx, '♻️ Reset to defaults.\n\n' + (await summary(userId)), qlSettingsMenuKeyboard());
+    await cleanSend(ctx, '♻️ Reset to defaults.\n\n' + (await summary(userId)), qlSettingsMenuKeyboard(await presetStore.get(userId)));
     return true;
   }
 
@@ -133,6 +141,19 @@ export async function handleQlSettingsCallback(ctx: BotContext, data: string): P
     return true;
   }
 
+  if (data === 'qls:autostake:on' || data === 'qls:autostake:off') {
+    await presetStore.update(userId, { autoStakeInitial: data.endsWith('on') });
+    await qlSettingsDashboard(ctx);
+    return true;
+  }
+
+  if (data.startsWith('qls:lock:')) {
+    const days = parseInt(data.slice(9), 10) as LockPeriodDays;
+    await presetStore.update(userId, { stakeLockPeriod: days });
+    await qlSettingsDashboard(ctx);
+    return true;
+  }
+
   return false;
 }
 
@@ -184,6 +205,24 @@ async function openEditor(ctx: BotContext, field: string): Promise<boolean> {
     case 'profile':
       ctx.session._qlSettingsEdit = false;
       await cleanSend(ctx, '🏷 <b>Token profile</b> <i>(UI label only)</i>', qlProfileKeyboard());
+      return true;
+    case 'autoStake':
+      ctx.session._qlSettingsEdit = false;
+      await cleanSend(
+        ctx,
+        '🔒 <b>Auto-stake initial buy</b>\n\n' +
+          'When ON and your fee sink is the stake pool, your initial buy is locked into the stake pool in the same transaction as the launch — you become the first staker, ahead of any sniper.',
+        qlAutoStakeKeyboard(preset.autoStakeInitial),
+      );
+      return true;
+    case 'stakeLock':
+      ctx.session._qlSettingsEdit = false;
+      await cleanSend(
+        ctx,
+        '⏳ <b>Stake lock period</b>\n\n' +
+          'How long your auto-staked tokens stay locked. Longer locks earn a bigger share of trading fees.',
+        qlStakeLockKeyboard(preset.stakeLockPeriod),
+      );
       return true;
   }
   return false;

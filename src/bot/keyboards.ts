@@ -182,8 +182,8 @@ export function socialsPromptKeyboard() {
 
 import type { QuickLaunchPreset } from '../store/presets.js';
 
-export function qlSettingsMenuKeyboard() {
-  return Markup.inlineKeyboard([
+export function qlSettingsMenuKeyboard(preset?: QuickLaunchPreset) {
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [
     [Markup.button.callback('🌐 Chain(s)', 'qls:edit:chains')],
     [Markup.button.callback('💵 Initial buy (USD)', 'qls:edit:initialBuy')],
     [Markup.button.callback('🎓 Graduation threshold', 'qls:edit:graduation')],
@@ -192,9 +192,41 @@ export function qlSettingsMenuKeyboard() {
     [Markup.button.callback('💸 Curve dev fee', 'qls:edit:bondingFee')],
     [Markup.button.callback('💸 AMM dev fee', 'qls:edit:ammFee')],
     [Markup.button.callback('🎯 Fee sink', 'qls:edit:feeSink')],
-    [Markup.button.callback('🏷 Token profile', 'qls:edit:profile')],
-    [Markup.button.callback('♻️ Reset to defaults', 'qls:reset')],
-    [Markup.button.callback('⬅️ Back', 'action:start')],
+  ];
+  // Stake controls are only relevant when fees route to a stake pool.
+  if (preset?.feeSink === 'stake_pool') {
+    const onOff = preset.autoStakeInitial ? 'ON' : 'OFF';
+    rows.push([Markup.button.callback(`🔒 Auto-stake initial: ${onOff}`, 'qls:edit:autoStake')]);
+    rows.push([Markup.button.callback(`⏳ Stake lock: ${preset.stakeLockPeriod}d`, 'qls:edit:stakeLock')]);
+  }
+  rows.push([Markup.button.callback('🏷 Token profile', 'qls:edit:profile')]);
+  rows.push([Markup.button.callback('♻️ Reset to defaults', 'qls:reset')]);
+  rows.push([Markup.button.callback('⬅️ Back', 'action:start')]);
+  return Markup.inlineKeyboard(rows);
+}
+
+export function qlAutoStakeKeyboard(current: boolean) {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback(current ? '✅ ON' : 'ON', 'qls:autostake:on'),
+      Markup.button.callback(!current ? '✅ OFF' : 'OFF', 'qls:autostake:off'),
+    ],
+    [Markup.button.callback('⬅️ Back', 'action:qlsettings')],
+  ]);
+}
+
+export function qlStakeLockKeyboard(current: number) {
+  const opts: [string, number][] = [
+    ['7d', 7], ['14d', 14], ['30d', 30], ['60d', 60], ['90d', 90], ['180d', 180],
+  ];
+  return Markup.inlineKeyboard([
+    opts.slice(0, 3).map(([label, days]) =>
+      Markup.button.callback(days === current ? `✅ ${label}` : label, `qls:lock:${days}`),
+    ),
+    opts.slice(3).map(([label, days]) =>
+      Markup.button.callback(days === current ? `✅ ${label}` : label, `qls:lock:${days}`),
+    ),
+    [Markup.button.callback('⬅️ Back', 'action:qlsettings')],
   ]);
 }
 

@@ -1,5 +1,5 @@
 import { Scenes } from 'telegraf';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { Connection, LAMPORTS_PER_SOL, PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import type { BotContext } from '../context.js';
 import { printr, PrintrApiError } from '../../printr/client.js';
 import { getChain } from '../../printr/chains.js';
@@ -9,6 +9,7 @@ import {
   type EvmSubmitResult,
   type SvmPayload,
 } from '../../printr/signer.js';
+import { buildAutoStakeIxs } from '../../printr/stake.js';
 import { walletStore } from '../../store/wallets.js';
 import { presetStore } from '../../store/presets.js';
 import type { EvmPayload } from '../../printr/types.js';
@@ -188,18 +189,28 @@ async function showQuoteAndConfirm(ctx: BotContext) {
     blastrFeeLabel,
   });
 
+  // Build an auto-stake teaser line for the confirm screen, when applicable.
+  const willAutoStake =
+    preset.autoStakeInitial &&
+    preset.feeSink === 'stake_pool' &&
+    preset.initialBuyUsd > 0 &&
+    hasSolana;
+  const autoStakeLine = willAutoStake
+    ? `\n🔒 <b>Auto-stake:</b> initial buy locked ${preset.stakeLockPeriod}d in same tx (first-staker bonus)`
+    : '';
+
   try {
     const quote = await printr.quote(quoteBody);
     await cleanSend(
       ctx,
-      `⚡ <b>Quick Launch</b>\n\n${summary}\n\n${formatQuote(quote)}\n\n<b>Confirm launch?</b>`,
+      `⚡ <b>Quick Launch</b>\n\n${summary}\n\n${formatQuote(quote)}${autoStakeLine}\n\n<b>Confirm launch?</b>`,
       confirmKeyboard(),
     );
   } catch (err) {
     const msg = err instanceof PrintrApiError ? `API: ${err.detail}` : 'Could not fetch quote';
     await cleanSend(
       ctx,
-      `⚡ <b>Quick Launch</b>\n\n${summary}\n\n⚠️ ${esc(msg)}\n\n<b>Launch anyway?</b>`,
+      `⚡ <b>Quick Launch</b>\n\n${summary}\n\n⚠️ ${esc(msg)}${autoStakeLine}\n\n<b>Launch anyway?</b>`,
       confirmKeyboard(),
     );
   }
@@ -281,7 +292,42 @@ async function handleConfirm(ctx: BotContext) {
                 lamports: Math.round(config.blastrFeeSol * LAMPORTS_PER_SOL),
               }
             : undefined;
-        const svmResult = await signAndSubmitSvm(payload as unknown as SvmPayload, key, undefined, svmFee);
+
+        // ── Auto-stake the initial buy in the same atomic tx ──
+        // Only when fee sink is the stake pool, user opted in, there's an
+        // initial buy, and Printr returned the token mint + quote amount.
+        let stakeIxs: TransactionInstruction[] | undefined;
+        const svmPayload = payload as unknown as SvmPayload;
+        const initialBuyAmt = result.quote?.initial_buy_amount;
+        if (
+          preset.autoStakeInitial &&
+          preset.feeSink === 'stake_pool' &&
+          preset.initialBuyUsd > 0 &&
+          svmPayload.mint &&
+          initialBuyAmt
+        ) {
+          try {
+            // 1% slippage buffer — actual buy may receive slightly less than quoted.
+            const toStake = (BigInt(initialBuyAmt) * 99n) / 100n;
+            const conn = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+            stakeIxs = await buildAutoStakeIxs({
+              payloadIxs: svmPayload.ixs,
+              owner: new PublicKey(svmWallet.address),
+              telecoinMint: new PublicKey(svmPayload.mint),
+              toStakeAmount: toStake,
+              lockPeriod: preset.stakeLockPeriod,
+              connection: conn,
+            });
+            logger.info({ userId, lock: preset.stakeLockPeriod, toStake: toStake.toString() }, 'auto-stake ixs built');
+          } catch (err) {
+            // Don't block the launch on stake-build failure — log and let the
+            // launch proceed without auto-stake. User can stake manually after.
+            logger.warn({ err, userId }, 'auto-stake ix build failed, proceeding without it');
+            stakeIxs = undefined;
+          }
+        }
+
+        const svmResult = await signAndSubmitSvm(svmPayload, key, undefined, svmFee, stakeIxs);
         await cleanSend(
           ctx,
           `${tokenMsg}\n\n<b>📡 Transaction Submitted</b>\n` +

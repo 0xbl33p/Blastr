@@ -1,5 +1,6 @@
 import { sql } from '../db/index.js';
 import type { FeeSink, MaxTelecoinSupply } from '../printr/types.js';
+import type { LockPeriodDays } from '../printr/stake.js';
 
 const SOLANA_CAIP2 = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
@@ -14,6 +15,11 @@ export interface QuickLaunchPreset {
   feeSink: FeeSink;
   /** UI-only label, not sent to the Printr API. */
   profile: string;
+  /** When fee_sink === 'stake_pool' and there's an initial buy, atomically
+   *  stake the bought tokens in the same tx so the dev gets first-staker spot. */
+  autoStakeInitial: boolean;
+  /** Lock duration when auto-staking. Longer = bigger fee share. */
+  stakeLockPeriod: LockPeriodDays;
 }
 
 export const DEFAULT_QUICK_PRESET: QuickLaunchPreset = {
@@ -26,6 +32,8 @@ export const DEFAULT_QUICK_PRESET: QuickLaunchPreset = {
   ammDevFeeBps: 20,
   feeSink: 'stake_pool',
   profile: 'memecoin',
+  autoStakeInitial: true,
+  stakeLockPeriod: 180,
 };
 
 class PresetStore {

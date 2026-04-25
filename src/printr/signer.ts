@@ -1,5 +1,6 @@
 import { ethers } from 'ethers';
 import {
+  AddressLookupTableAccount,
   Connection,
   Keypair,
   PublicKey,
@@ -26,13 +27,13 @@ export interface FeeTransferEvm {
 
 // ── Solana payload types (from Printr API) ──
 
-interface SvmAccount {
+export interface SvmAccount {
   pubkey: string;
   is_signer: boolean;
   is_writable: boolean;
 }
 
-interface SvmInstruction {
+export interface SvmInstruction {
   program_id: string;
   accounts: SvmAccount[];
   data: string; // base64
@@ -108,6 +109,8 @@ export async function signAndSubmitSvm(
   privateKey: string,
   rpcUrl?: string,
   feeTransfer?: FeeTransferSvm,
+  /** Extra instructions appended after Printr's payload (e.g., auto-stake). */
+  extraIxs?: TransactionInstruction[],
 ): Promise<SvmSubmitResult> {
   const rpc = rpcUrl || DEFAULT_SOLANA_RPC;
   const connection = new Connection(rpc, 'confirmed');
@@ -144,6 +147,22 @@ export async function signAndSubmitSvm(
     ),
   );
 
+  // Append any caller-supplied extras (e.g. auto-stake refresh + create_stake_position)
+  if (extraIxs && extraIxs.length > 0) {
+    instructions.push(...extraIxs);
+  }
+
+  // Fetch the lookup table Printr returned, if any. Crucial when we add extra
+  // ixs: without LUTs the wire-serialized tx blows past Solana's 1232-byte cap.
+  const lookupTables: AddressLookupTableAccount[] = [];
+  if (payload.lookup_table) {
+    const lutAddr = new PublicKey(payload.lookup_table);
+    const lutAcc = await connection.getAddressLookupTable(lutAddr);
+    if (lutAcc.value) {
+      lookupTables.push(lutAcc.value);
+    }
+  }
+
   // Get recent blockhash
   const { blockhash } = await connection.getLatestBlockhash();
 
@@ -152,7 +171,7 @@ export async function signAndSubmitSvm(
     payerKey: keypair.publicKey,
     recentBlockhash: blockhash,
     instructions,
-  }).compileToV0Message();
+  }).compileToV0Message(lookupTables);
 
   const tx = new VersionedTransaction(message);
   tx.sign([keypair]);
