@@ -9,6 +9,8 @@ import { walletStore } from '../../store/wallets.js';
 import { tokenStore } from '../../store/tokens.js';
 import { presetStore } from '../../store/presets.js';
 import { buildAutoStakeIxs, planAutoStake, renderAutoStakeStatus } from '../../printr/stake.js';
+import { extractSwapContext } from '../../printr/sell.js';
+import { renderTradePanel } from '../trade.js';
 import { Connection, PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import {
   chainKeyboard,
@@ -521,9 +523,15 @@ async function handleConfirm(ctx: BotContext) {
     const tokenMsg = formatTokenCreated(result.token_id, appUrl);
     const payload = result.payload;
 
-    // Best-effort record so /mytokens can list it later.
+    // Best-effort record so /mytokens can list it later. Also stash swap
+    // accounts from the launch payload so the trade panel can sell later.
+    const svmPayloadForCtx = payload as unknown as SvmPayload;
+    const swapCtx =
+      svmPayloadForCtx.ixs && svmPayloadForCtx.mint
+        ? extractSwapContext(svmPayloadForCtx.ixs, svmPayloadForCtx.mint)
+        : null;
     void tokenStore
-      .record(userId, result.token_id, launch.name!, launch.symbol!, chains)
+      .record(userId, result.token_id, launch.name!, launch.symbol!, chains, swapCtx)
       .catch((err) => logger.warn({ err, userId, tokenId: result.token_id }, 'tokenStore.record failed'));
 
     logger.debug({ userId, payloadKeys: Object.keys(payload) }, 'launch payload');
@@ -591,6 +599,9 @@ async function handleConfirm(ctx: BotContext) {
             `<b>Status:</b> ${svmResult.confirmation_status}` +
             stakeOutcome,
           mainMenuKeyboard(),
+        );
+        renderTradePanel(ctx, result.token_id).catch((err) =>
+          logger.warn({ err, userId, tokenId: result.token_id }, 'trade panel render failed'),
         );
         signed = true;
       } catch (err) {

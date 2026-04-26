@@ -26,6 +26,7 @@ import {
   handleQlSettingsCallback,
   handleQlSettingsText,
 } from './bot/qlSettings.js';
+import { handleTradeCallback } from './bot/trade.js';
 import { cleanSend } from './bot/helpers.js';
 import { walletRequiredKeyboard } from './bot/keyboards.js';
 
@@ -98,6 +99,13 @@ async function main(): Promise<void> {
   bot.action('chains:done', async (ctx) => {
     await ctx.answerCbQuery().catch(() => {});
     await handleQuoteChainCb(ctx, 'chains:done');
+  });
+
+  // Trade panel callbacks (trade:open|close|sell|do:<tokenId>:<percent>)
+  bot.action(/^trade:/, async (ctx) => {
+    await ctx.answerCbQuery().catch(() => {});
+    const data = ctx.callbackQuery && 'data' in ctx.callbackQuery ? ctx.callbackQuery.data : '';
+    await handleTradeCallback(ctx, data);
   });
 
   // ── Menu actions ──

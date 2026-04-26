@@ -10,6 +10,8 @@ import {
   type SvmPayload,
 } from '../../printr/signer.js';
 import { buildAutoStakeIxs, planAutoStake, renderAutoStakeStatus } from '../../printr/stake.js';
+import { extractSwapContext } from '../../printr/sell.js';
+import { renderTradePanel } from '../trade.js';
 import { walletStore } from '../../store/wallets.js';
 import { presetStore } from '../../store/presets.js';
 import { tokenStore } from '../../store/tokens.js';
@@ -316,8 +318,15 @@ async function handleConfirm(ctx: BotContext) {
 
     // Record the launch — best-effort, not blocking. If this fails, the
     // launch still proceeds and the user just won't see it in /mytokens.
+    // We also stash the swap accounts so /mytokens → Trade can build sell ixs
+    // later without re-querying Printr.
+    const svmPayloadForCtx = payload as unknown as SvmPayload;
+    const swapCtx =
+      svmPayloadForCtx.ixs && svmPayloadForCtx.mint
+        ? extractSwapContext(svmPayloadForCtx.ixs, svmPayloadForCtx.mint)
+        : null;
     void tokenStore
-      .record(userId, result.token_id, launch.name!, launch.symbol!, chains)
+      .record(userId, result.token_id, launch.name!, launch.symbol!, chains, swapCtx)
       .catch((err) => logger.warn({ err, userId, tokenId: result.token_id }, 'tokenStore.record failed'));
 
     const hasSolana = chains.some((c) => c.startsWith('solana:'));
@@ -380,6 +389,10 @@ async function handleConfirm(ctx: BotContext) {
             `<b>Status:</b> ${svmResult.confirmation_status}` +
             stakeOutcome,
           mainMenuKeyboard(),
+        );
+        // Post-launch trade panel — best-effort; don't block launch result on render failure.
+        renderTradePanel(ctx, result.token_id).catch((err) =>
+          logger.warn({ err, userId, tokenId: result.token_id }, 'trade panel render failed'),
         );
         signed = true;
       } catch (err) {

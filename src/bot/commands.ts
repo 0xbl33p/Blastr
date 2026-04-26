@@ -411,7 +411,24 @@ export async function myTokensCommand(ctx: BotContext) {
     );
   }
 
-  await cleanSend(ctx, lines.join('\n\n'), mainMenuKeyboard());
+  // Build a Trade-button keyboard: one row per token (only Solana tokens
+  // with a stored swap context can be sold from inside the bot).
+  const Markup = await import('telegraf').then((m) => m.Markup);
+  const tradeRows = tokens
+    .filter((t) => t.swapContext && t.chains.some((c) => c.startsWith('solana:')))
+    .slice(0, 5) // cap rows so the keyboard stays manageable
+    .map((t) => [
+      Markup.button.callback(
+        `💱 Trade ${t.symbol ? '$' + t.symbol : t.tokenId.slice(0, 6)}`,
+        `trade:open:${t.tokenId}`,
+      ),
+    ]);
+  const kb = Markup.inlineKeyboard([
+    ...tradeRows,
+    [Markup.button.callback('🏠 Main menu', 'action:start')],
+  ]);
+
+  await cleanSend(ctx, lines.join('\n\n'), kb);
 }
 
 // ── /status ──
