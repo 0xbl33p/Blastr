@@ -17,6 +17,8 @@ import {
   confirmKeyboard,
   mainMenuKeyboard,
   socialsPromptKeyboard,
+  justMenu,
+  withMenu,
 } from '../keyboards.js';
 import {
   formatQuote,
@@ -46,7 +48,12 @@ function getCbData(ctx: BotContext): string | undefined {
 
 function skipButton() {
   return {
-    reply_markup: { inline_keyboard: [[{ text: 'Skip', callback_data: 'skip' }]] },
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '⏭ Skip', callback_data: 'skip' }],
+        [{ text: '🏠 Menu', callback_data: 'action:start' }],
+      ],
+    },
   };
 }
 
@@ -55,11 +62,11 @@ async function receiveName(ctx: BotContext) {
   const text = getText(ctx);
   if (!text) return;
   if (text.length < 1 || text.length > 32) {
-    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:');
+    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:', justMenu());
     return;
   }
   ctx.session.launch.name = text;
-  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars)</i>');
+  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars)</i>', justMenu());
   return ctx.wizard.next();
 }
 
@@ -68,7 +75,7 @@ async function receiveSymbol(ctx: BotContext) {
   const text = getText(ctx);
   if (!text) return;
   if (text.length < 1 || text.length > 10) {
-    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:');
+    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:', justMenu());
     return;
   }
   ctx.session.launch.symbol = text.toUpperCase();
@@ -117,7 +124,7 @@ async function receiveImage(ctx: BotContext) {
     return;
   }
 
-  await cleanSend(ctx, SOCIALS_PROMPT, socialsPromptKeyboard());
+  await cleanSend(ctx, SOCIALS_PROMPT, withMenu(socialsPromptKeyboard()));
   return ctx.wizard.next();
 }
 
@@ -142,9 +149,9 @@ async function showQuoteAndConfirm(ctx: BotContext) {
   const launch = ctx.session.launch;
 
   const initialBuy =
-    preset.initialBuyUsd > 0
-      ? { spend_usd: preset.initialBuyUsd }
-      : { spend_usd: 0.01 };
+    preset.initialBuySol > 0
+      ? { spend_native: Math.floor(preset.initialBuySol * LAMPORTS_PER_SOL).toString() }
+      : { spend_native: '100000' }; // 0.0001 SOL — Printr requires non-zero to quote
 
   const quoteBody = {
     chains: preset.chains,
@@ -176,7 +183,7 @@ async function showQuoteAndConfirm(ctx: BotContext) {
     symbol: launch.symbol!,
     description: appendBlastrTag(launch.description),
     chains: preset.chains,
-    initialBuyUsd: preset.initialBuyUsd,
+    initialBuySol: preset.initialBuySol,
     graduationThreshold: preset.graduationThreshold,
     hasImage: !!launch.image,
     maxSupply: preset.maxSupply,
@@ -193,7 +200,7 @@ async function showQuoteAndConfirm(ctx: BotContext) {
   const willAutoStake =
     preset.autoStakeInitial &&
     preset.feeSink === 'stake_pool' &&
-    preset.initialBuyUsd > 0 &&
+    preset.initialBuySol > 0 &&
     hasSolana;
   const autoStakeLine = willAutoStake
     ? `\n🔒 <b>Auto-stake:</b> initial buy locked ${preset.stakeLockPeriod}d in same tx (first-staker bonus)`
@@ -246,9 +253,9 @@ async function handleConfirm(ctx: BotContext) {
   });
 
   const initialBuy =
-    preset.initialBuyUsd > 0
-      ? { spend_usd: preset.initialBuyUsd }
-      : { spend_usd: 0.01 };
+    preset.initialBuySol > 0
+      ? { spend_native: Math.floor(preset.initialBuySol * LAMPORTS_PER_SOL).toString() }
+      : { spend_native: '100000' };
 
   await cleanSend(ctx, '⚡ Creating token on Printr...');
 
@@ -302,7 +309,7 @@ async function handleConfirm(ctx: BotContext) {
         if (
           preset.autoStakeInitial &&
           preset.feeSink === 'stake_pool' &&
-          preset.initialBuyUsd > 0 &&
+          preset.initialBuySol > 0 &&
           svmPayload.mint &&
           initialBuyAmt
         ) {

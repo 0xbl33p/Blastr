@@ -7,7 +7,7 @@ export interface LaunchState {
   description: string;
   image: string;
   chains: string[];
-  initialBuyUsd: number;
+  initialBuySol: number;
   graduationThreshold: number;
   // ── advanced launch params ──
   maxSupply: MaxTelecoinSupply;

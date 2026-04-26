@@ -342,3 +342,22 @@ export function confirmKeyboard() {
     ],
   ]);
 }
+
+// ── Wizard escape hatch ──
+// Every step of the launch wizard needs a way out for users who fat-finger an
+// answer. action:start is already wired in both scenes to leave + return to
+// the main menu, so we just bolt a "Menu" row onto every prompt's keyboard.
+
+const wizardMenuButton = Markup.button.callback('🏠 Menu', 'action:start');
+
+export function justMenu() {
+  return Markup.inlineKeyboard([[wizardMenuButton]]);
+}
+
+/** Append a "Menu" row to an existing inline keyboard. */
+export function withMenu(kb: ReturnType<typeof Markup.inlineKeyboard>) {
+  return Markup.inlineKeyboard([
+    ...kb.reply_markup.inline_keyboard,
+    [wizardMenuButton],
+  ]);
+}

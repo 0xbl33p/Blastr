@@ -6,7 +6,8 @@ const SOLANA_CAIP2 = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
 
 export interface QuickLaunchPreset {
   chains: string[];
-  initialBuyUsd: number;
+  /** Initial buy amount in SOL (human units, e.g. 0.5). 0 = skip the buy. */
+  initialBuySol: number;
   graduationThreshold: number;
   maxSupply: MaxTelecoinSupply;
   supplyOnCurveBps: number;
@@ -24,7 +25,7 @@ export interface QuickLaunchPreset {
 
 export const DEFAULT_QUICK_PRESET: QuickLaunchPreset = {
   chains: [SOLANA_CAIP2],
-  initialBuyUsd: 0,
+  initialBuySol: 0,
   graduationThreshold: 69000,
   maxSupply: '1_billion',
   supplyOnCurveBps: 7000,

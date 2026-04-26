@@ -19,6 +19,8 @@ import {
   ammFeeKeyboard,
   feeSinkKeyboard,
   socialsPromptKeyboard,
+  justMenu,
+  withMenu,
 } from '../keyboards.js';
 import type { FeeSink, MaxTelecoinSupply } from '../../printr/types.js';
 import { parseSocials, cleanExternalLinks, SOCIALS_PROMPT } from '../socials.js';
@@ -64,7 +66,10 @@ function getCbData(ctx: BotContext): string | undefined {
 function skipButton() {
   return {
     reply_markup: {
-      inline_keyboard: [[{ text: 'Skip', callback_data: 'skip' }]],
+      inline_keyboard: [
+        [{ text: '⏭ Skip', callback_data: 'skip' }],
+        [{ text: '🏠 Menu', callback_data: 'action:start' }],
+      ],
     },
   };
 }
@@ -74,11 +79,11 @@ async function receiveName(ctx: BotContext) {
   const text = getText(ctx);
   if (!text) return;
   if (text.length < 1 || text.length > 32) {
-    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:');
+    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:', justMenu());
     return;
   }
   ctx.session.launch.name = text;
-  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars, e.g. BLASTR)</i>');
+  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars, e.g. BLASTR)</i>', justMenu());
   return ctx.wizard.next();
 }
 
@@ -87,7 +92,7 @@ async function receiveSymbol(ctx: BotContext) {
   const text = getText(ctx);
   if (!text) return;
   if (text.length < 1 || text.length > 10) {
-    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:');
+    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:', justMenu());
     return;
   }
   ctx.session.launch.symbol = text.toUpperCase();
@@ -111,7 +116,7 @@ async function receiveDescription(ctx: BotContext) {
   } else {
     return;
   }
-  await cleanSend(ctx, SOCIALS_PROMPT, socialsPromptKeyboard());
+  await cleanSend(ctx, SOCIALS_PROMPT, withMenu(socialsPromptKeyboard()));
   return ctx.wizard.next();
 }
 
@@ -172,7 +177,7 @@ async function receiveImage(ctx: BotContext) {
   const userId = ctx.from!.id.toString();
   const walletTypes = await walletStore.getUserWalletTypes(userId);
   const selected = ctx.session.launch.chains ?? [];
-  await cleanSend(ctx, 'Select the chain(s) to deploy on:', chainKeyboard(selected, walletTypes));
+  await cleanSend(ctx, 'Select the chain(s) to deploy on:', withMenu(chainKeyboard(selected, walletTypes)));
   return ctx.wizard.next();
 }
 
@@ -185,7 +190,7 @@ async function handleChainSelection(ctx: BotContext) {
   if (data === 'chains:done') {
     const chains = ctx.session.launch.chains ?? [];
     if (chains.length === 0) return;
-    await cleanSend(ctx, 'How much USD for the initial buy?\n\n<i>Enter 0 to skip, or an amount like 10</i>');
+    await cleanSend(ctx, 'How much SOL for the initial buy?\n\n<i>Enter 0 to skip, or an amount like 0.5</i>', justMenu());
     return ctx.wizard.next();
   }
 
@@ -211,11 +216,11 @@ async function receiveInitialBuy(ctx: BotContext) {
   if (!text) return;
   const amount = parseFloat(text.replace(/[$,]/g, ''));
   if (isNaN(amount) || amount < 0) {
-    await cleanSend(ctx, 'Invalid amount. Enter a number in USD <i>(e.g. 10, or 0 to skip)</i>:');
+    await cleanSend(ctx, 'Invalid amount. Enter a number in SOL <i>(e.g. 0.5, or 0 to skip)</i>:', justMenu());
     return;
   }
-  ctx.session.launch.initialBuyUsd = amount;
-  await cleanSend(ctx, 'Graduation threshold per chain:', graduationKeyboard());
+  ctx.session.launch.initialBuySol = amount;
+  await cleanSend(ctx, 'Graduation threshold per chain:', withMenu(graduationKeyboard()));
   return ctx.wizard.next();
 }
 
@@ -233,7 +238,7 @@ async function receiveGraduation(ctx: BotContext) {
     '🛠 <b>Launch mode</b>\n\n' +
       '<b>Quick:</b> use sensible defaults (1B supply, 70% curve, 1% bonding fee, 0.5% AMM fee, fees → creator)\n\n' +
       '<b>Advanced:</b> customize supply, curve ratio, creator fees, and fee sink.',
-    advancedToggleKeyboard(),
+    withMenu(advancedToggleKeyboard()),
   );
   return ctx.wizard.next();
 }
@@ -255,7 +260,7 @@ async function handleAdvancedToggle(ctx: BotContext) {
   }
 
   if (data === 'adv:open') {
-    await cleanSend(ctx, '🪙 <b>Max supply</b>\n\nTotal token supply at graduation.', maxSupplyKeyboard());
+    await cleanSend(ctx, '🪙 <b>Max supply</b>\n\nTotal token supply at graduation.', withMenu(maxSupplyKeyboard()));
     return ctx.wizard.next();
   }
 }
@@ -270,7 +275,7 @@ async function handleMaxSupply(ctx: BotContext) {
     ctx,
     '📈 <b>Bonding curve supply ratio</b>\n\n' +
       'Percent of supply sold on the bonding curve. The rest is deposited into the AMM at graduation.',
-    supplyRatioKeyboard(),
+    withMenu(supplyRatioKeyboard()),
   );
   return ctx.wizard.next();
 }
@@ -284,7 +289,7 @@ async function handleSupplyRatio(ctx: BotContext) {
   await cleanSend(
     ctx,
     '💵 <b>Bonding curve dev fee</b>\n\nYour cut of trading fees while on the curve (0-1.5%).',
-    bondingFeeKeyboard(),
+    withMenu(bondingFeeKeyboard()),
   );
   return ctx.wizard.next();
 }
@@ -298,7 +303,7 @@ async function handleBondingFee(ctx: BotContext) {
   await cleanSend(
     ctx,
     '💵 <b>AMM dev fee</b>\n\nYour cut of trading fees after graduation (0-0.8%).',
-    ammFeeKeyboard(),
+    withMenu(ammFeeKeyboard()),
   );
   return ctx.wizard.next();
 }
@@ -312,7 +317,7 @@ async function handleAmmFee(ctx: BotContext) {
   await cleanSend(
     ctx,
     '🎯 <b>Fee sink</b>\n\nWhere collected fees route.',
-    feeSinkKeyboard(),
+    withMenu(feeSinkKeyboard()),
   );
   return ctx.wizard.next();
 }
@@ -330,9 +335,9 @@ async function handleFeeSink(ctx: BotContext) {
 async function showQuoteAndConfirm(ctx: BotContext) {
   const launch = ctx.session.launch;
 
-  const initialBuy = (launch.initialBuyUsd ?? 0) > 0
-    ? { spend_usd: launch.initialBuyUsd! }
-    : { spend_usd: 0.01 };
+  const initialBuy = (launch.initialBuySol ?? 0) > 0
+    ? { spend_native: Math.floor(launch.initialBuySol! * LAMPORTS_PER_SOL).toString() }
+    : { spend_native: '100000' };
 
   const quoteBody = {
     chains: launch.chains!,
@@ -364,7 +369,7 @@ async function showQuoteAndConfirm(ctx: BotContext) {
     symbol: launch.symbol!,
     description: appendBlastrTag(launch.description),
     chains: launch.chains!,
-    initialBuyUsd: launch.initialBuyUsd!,
+    initialBuySol: launch.initialBuySol!,
     graduationThreshold: launch.graduationThreshold!,
     hasImage: !!launch.image,
     maxSupply: launch.maxSupply,
@@ -414,9 +419,9 @@ async function handleConfirm(ctx: BotContext) {
     return `${chainCaip2}:${defaultWallet?.address ?? ''}`;
   });
 
-  const initialBuy = launch.initialBuyUsd! > 0
-    ? { spend_usd: launch.initialBuyUsd! }
-    : { spend_usd: 0.01 };
+  const initialBuy = launch.initialBuySol! > 0
+    ? { spend_native: Math.floor(launch.initialBuySol! * LAMPORTS_PER_SOL).toString() }
+    : { spend_native: '100000' };
 
   await cleanSend(ctx, '⏳ Creating token on Printr...');
 

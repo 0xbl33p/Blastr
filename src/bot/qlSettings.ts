@@ -27,7 +27,7 @@ async function summary(userId: string): Promise<string> {
     '⚙️ <b>Quick Launch Settings</b>',
     '',
     `<b>Chain(s):</b> ${chains}`,
-    `<b>Initial Buy:</b> $${p.initialBuyUsd}`,
+    `<b>Initial Buy:</b> ${p.initialBuySol} SOL`,
     `<b>Graduation:</b> $${p.graduationThreshold.toLocaleString()}`,
     `<b>Max Supply:</b> ${SUPPLY_LABEL[p.maxSupply] ?? p.maxSupply}`,
     `<b>Curve Supply:</b> ${(p.supplyOnCurveBps / 100).toFixed(0)}%`,
@@ -174,7 +174,7 @@ async function openEditor(ctx: BotContext, field: string): Promise<boolean> {
       ctx.session._qlSettingsEdit = 'initialBuy';
       await cleanSend(
         ctx,
-        `💵 <b>Initial Buy (USD)</b>\n\nCurrent: $${preset.initialBuyUsd}\n\nSend an amount (e.g. <b>10</b>, or <b>0</b> to skip):`,
+        `💵 <b>Initial Buy (SOL)</b>\n\nCurrent: ${preset.initialBuySol} SOL\n\nSend an amount (e.g. <b>0.5</b>, or <b>0</b> to skip):`,
         qlBackKeyboard(),
       );
       return true;
@@ -242,10 +242,10 @@ export async function handleQlSettingsText(ctx: BotContext): Promise<boolean> {
   if (mode === 'initialBuy') {
     const amount = parseFloat(text.replace(/[$,]/g, ''));
     if (isNaN(amount) || amount < 0) {
-      await cleanSend(ctx, '❌ Invalid amount. Send a number (e.g. 10):', qlBackKeyboard());
+      await cleanSend(ctx, '❌ Invalid amount. Send a number in SOL (e.g. 0.5):', qlBackKeyboard());
       return true;
     }
-    await presetStore.update(userId, { initialBuyUsd: amount });
+    await presetStore.update(userId, { initialBuySol: amount });
     ctx.session._qlSettingsEdit = false;
     await qlSettingsDashboard(ctx);
     return true;

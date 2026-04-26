@@ -44,7 +44,7 @@ export function formatLaunchSummary(params: {
   symbol: string;
   description: string;
   chains: string[];
-  initialBuyUsd: number;
+  initialBuySol: number;
   graduationThreshold: number;
   hasImage?: boolean;
   maxSupply?: string;
@@ -66,7 +66,7 @@ export function formatLaunchSummary(params: {
     `<b>Description:</b> ${esc(params.description || '—')}`,
     `<b>Image:</b> ${params.hasImage ? '✅ uploaded' : '—'}`,
     `<b>Chain(s):</b> ${chainNames}`,
-    `<b>Initial Buy:</b> $${params.initialBuyUsd}`,
+    `<b>Initial Buy:</b> ${params.initialBuySol} SOL`,
     `<b>Graduation:</b> $${params.graduationThreshold.toLocaleString()}`,
   ];
 
