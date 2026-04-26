@@ -6,6 +6,7 @@ import { signAndSubmitEvm } from '../../printr/signer.js';
 import { signAndSubmitSvm } from '../../printr/signer.js';
 import type { SvmPayload, EvmSubmitResult } from '../../printr/signer.js';
 import { walletStore } from '../../store/wallets.js';
+import { tokenStore } from '../../store/tokens.js';
 import {
   chainKeyboard,
   graduationKeyboard,
@@ -448,6 +449,11 @@ async function handleConfirm(ctx: BotContext) {
     const appUrl = config.printrBaseUrl.replace('api-preview', 'app');
     const tokenMsg = formatTokenCreated(result.token_id, appUrl);
     const payload = result.payload;
+
+    // Best-effort record so /mytokens can list it later.
+    void tokenStore
+      .record(userId, result.token_id, launch.name!, launch.symbol!, chains)
+      .catch((err) => logger.warn({ err, userId, tokenId: result.token_id }, 'tokenStore.record failed'));
 
     logger.debug({ userId, payloadKeys: Object.keys(payload) }, 'launch payload');
 

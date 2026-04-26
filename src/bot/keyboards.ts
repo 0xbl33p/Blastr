@@ -7,7 +7,7 @@ export function mainMenuKeyboard() {
     [Markup.button.callback('⚡ Quick Launch', 'action:quicklaunch')],
     [Markup.button.callback('🚀 Launch Token', 'action:launch')],
     [
-      Markup.button.callback('💰 Quote', 'action:quote'),
+      Markup.button.callback('📜 My Tokens', 'action:mytokens'),
       Markup.button.callback('📊 Status', 'action:status'),
     ],
     [

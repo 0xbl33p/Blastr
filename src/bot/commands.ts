@@ -5,6 +5,8 @@ import type { BotContext } from './context.js';
 import { printr, PrintrApiError } from '../printr/client.js';
 import { CHAINS, chainLabel } from '../printr/chains.js';
 import { walletStore } from '../store/wallets.js';
+import { tokenStore } from '../store/tokens.js';
+import { config } from '../config.js';
 import {
   generateEvmWallet,
   generateSolanaWallet,
@@ -372,6 +374,44 @@ export async function handleQuoteAmount(ctx: BotContext): Promise<boolean> {
   ctx.session._quoteMode = false;
   ctx.session.launch = {};
   return true;
+}
+
+// ── /mytokens ──
+
+export async function myTokensCommand(ctx: BotContext) {
+  const userId = ctx.from!.id.toString();
+  const tokens = await tokenStore.list(userId, 20);
+
+  if (tokens.length === 0) {
+    await cleanSend(
+      ctx,
+      '<b>📜 Your Tokens</b>\n\n' +
+        'No launches yet. Tap <b>⚡ Quick Launch</b> or <b>🚀 Launch Token</b> to ship your first.',
+      mainMenuKeyboard(),
+    );
+    return;
+  }
+
+  const appUrl = config.printrBaseUrl.replace('api-preview', 'app');
+  const lines: string[] = [`<b>📜 Your Tokens</b> (${tokens.length})`, ''];
+  for (const t of tokens) {
+    const date = t.createdAt.toISOString().split('T')[0];
+    const chainLabels = t.chains.map((c) => {
+      if (c.startsWith('solana:')) return '☀️';
+      if (c.startsWith('eip155:8453')) return '🔵';
+      if (c.startsWith('eip155:1')) return '💎';
+      if (c.startsWith('eip155:42161')) return '🔹';
+      return '🔗';
+    }).join(' ');
+    const symbol = t.symbol ? `$${esc(t.symbol)}` : '?';
+    const name = t.name ? esc(t.name) : '(unnamed)';
+    lines.push(
+      `🪙 <b>${symbol}</b> · ${name}  ${chainLabels}\n` +
+        `   ${date} · <a href="${appUrl}/trade/${t.tokenId}">view on Printr</a>`,
+    );
+  }
+
+  await cleanSend(ctx, lines.join('\n\n'), mainMenuKeyboard());
 }
 
 // ── /status ──

@@ -12,6 +12,7 @@ import {
 import { buildAutoStakeIxs } from '../../printr/stake.js';
 import { walletStore } from '../../store/wallets.js';
 import { presetStore } from '../../store/presets.js';
+import { tokenStore } from '../../store/tokens.js';
 import type { EvmPayload } from '../../printr/types.js';
 import {
   confirmKeyboard,
@@ -282,6 +283,12 @@ async function handleConfirm(ctx: BotContext) {
     const appUrl = config.printrBaseUrl.replace('api-preview', 'app');
     const tokenMsg = formatTokenCreated(result.token_id, appUrl);
     const payload = result.payload;
+
+    // Record the launch — best-effort, not blocking. If this fails, the
+    // launch still proceeds and the user just won't see it in /mytokens.
+    void tokenStore
+      .record(userId, result.token_id, launch.name!, launch.symbol!, chains)
+      .catch((err) => logger.warn({ err, userId, tokenId: result.token_id }, 'tokenStore.record failed'));
 
     const hasSolana = chains.some((c) => c.startsWith('solana:'));
     const hasEvm = chains.some((c) => !c.startsWith('solana:'));

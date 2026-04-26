@@ -15,6 +15,7 @@ import {
   quoteCommand,
   statusCommand,
   walletDashboard,
+  myTokensCommand,
   handleWalletCallbacks,
   handleWalletImportText,
   handleQuoteChainCb,
@@ -63,6 +64,7 @@ async function main(): Promise<void> {
   bot.command('quote', quoteCommand);
   bot.command('status', statusCommand);
   bot.command('settings', qlSettingsDashboard);
+  bot.command('mytokens', myTokensCommand);
 
   bot.command('launch', async (ctx) => {
     if (!(await requireWallet(ctx))) return;
@@ -118,6 +120,7 @@ async function main(): Promise<void> {
 
   bot.action('action:quote', (ctx) => { ctx.answerCbQuery().catch(() => {}); return quoteCommand(ctx); });
   bot.action('action:status', (ctx) => { ctx.answerCbQuery().catch(() => {}); return statusCommand(ctx); });
+  bot.action('action:mytokens', (ctx) => { ctx.answerCbQuery().catch(() => {}); return myTokensCommand(ctx); });
   bot.action('action:wallet', (ctx) => { ctx.answerCbQuery().catch(() => {}); return walletDashboard(ctx); });
   bot.action('action:help', (ctx) => { ctx.answerCbQuery().catch(() => {}); return helpCommand(ctx); });
   bot.action('action:start', (ctx) => { ctx.answerCbQuery().catch(() => {}); return startCommand(ctx); });
