@@ -7,6 +7,9 @@ import { signAndSubmitSvm } from '../../printr/signer.js';
 import type { SvmPayload, EvmSubmitResult } from '../../printr/signer.js';
 import { walletStore } from '../../store/wallets.js';
 import { tokenStore } from '../../store/tokens.js';
+import { presetStore } from '../../store/presets.js';
+import { buildAutoStakeIxs, planAutoStake, renderAutoStakeStatus } from '../../printr/stake.js';
+import { Connection, PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import {
   chainKeyboard,
   graduationKeyboard,
@@ -435,12 +438,26 @@ async function showQuoteAndConfirm(ctx: BotContext) {
     blastrFeeLabel,
   });
 
+  // Auto-stake plan teaser. Pulls toggle/lock from preset since /launch
+  // wizard doesn't ask for them inline (Quick Launch Settings owns those).
+  const userId = ctx.from!.id.toString();
+  const preset = await presetStore.get(userId);
+  const stakePlan = planAutoStake({
+    feeSink: launch.feeSink!,
+    initialBuySol: launch.initialBuySol ?? 0,
+    hasSolanaChain: hasSolana,
+    autoStakeInitial: preset.autoStakeInitial,
+    stakeLockPeriod: preset.stakeLockPeriod,
+  });
+  const stakeStatusLine = renderAutoStakeStatus(stakePlan);
+  const stakeBlock = stakeStatusLine ? `\n${stakeStatusLine}` : '';
+
   try {
     const quote = await printr.quote(quoteBody);
-    await cleanSend(ctx, `${summary}\n\n${formatQuote(quote)}\n\n<b>Confirm launch?</b>`, confirmKeyboard());
+    await cleanSend(ctx, `${summary}\n\n${formatQuote(quote)}${stakeBlock}\n\n<b>Confirm launch?</b>`, confirmKeyboard());
   } catch (err) {
     const msg = err instanceof PrintrApiError ? `API: ${err.detail}` : 'Could not fetch quote';
-    await cleanSend(ctx, `${summary}\n\n⚠️ ${esc(msg)}\n\n<b>Launch anyway?</b>`, confirmKeyboard());
+    await cleanSend(ctx, `${summary}\n\n⚠️ ${esc(msg)}${stakeBlock}\n\n<b>Launch anyway?</b>`, confirmKeyboard());
   }
   return ctx.wizard.selectStep(14);
 }
@@ -464,6 +481,7 @@ async function handleConfirm(ctx: BotContext) {
   const evmWallet = userWallets.wallets.find((w) => w.type === 'evm');
   const svmWallet = userWallets.wallets.find((w) => w.type === 'svm');
   const defaultWallet = await walletStore.getDefaultWallet(userId);
+  const preset = await presetStore.get(userId);
 
   // Build creator_accounts using the right wallet for each chain
   const creatorAccounts = chains.map((chainCaip2) => {
@@ -528,12 +546,50 @@ async function handleConfirm(ctx: BotContext) {
                 lamports: Math.round(config.blastrFeeSol * LAMPORTS_PER_SOL),
               }
             : undefined;
-        const svmResult = await signAndSubmitSvm(payload as unknown as SvmPayload, key, undefined, svmFee);
+
+        // ── Auto-stake the initial buy in the same atomic tx ──
+        let stakeIxs: TransactionInstruction[] | undefined;
+        let stakeOutcome = '';
+        const svmPayload = payload as unknown as SvmPayload;
+        const stakePlan = planAutoStake({
+          feeSink: launch.feeSink!,
+          initialBuySol: launch.initialBuySol ?? 0,
+          hasSolanaChain: hasSolana,
+          autoStakeInitial: preset.autoStakeInitial,
+          stakeLockPeriod: preset.stakeLockPeriod,
+        });
+        const initialBuyAmt = result.quote?.initial_buy_amount;
+        if (stakePlan.willStake && svmPayload.mint && initialBuyAmt) {
+          try {
+            const toStake = (BigInt(initialBuyAmt) * 99n) / 100n; // 1% slippage buffer
+            const conn = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+            stakeIxs = await buildAutoStakeIxs({
+              payloadIxs: svmPayload.ixs,
+              owner: new PublicKey(svmWallet.address),
+              telecoinMint: new PublicKey(svmPayload.mint),
+              toStakeAmount: toStake,
+              lockPeriod: preset.stakeLockPeriod,
+              connection: conn,
+            });
+            stakeOutcome = `\n🔒 Auto-staked initial buy → ${preset.stakeLockPeriod}d lock`;
+            logger.info({ userId, lock: preset.stakeLockPeriod, toStake: toStake.toString() }, 'auto-stake ixs built (launch flow)');
+          } catch (err) {
+            logger.warn({ err, userId }, 'auto-stake ix build failed, proceeding without it');
+            stakeOutcome = `\n⚠️ Auto-stake skipped — build error. Stake manually on Printr.`;
+            stakeIxs = undefined;
+          }
+        } else if (launch.feeSink === 'stake_pool') {
+          // fee sink IS stake_pool but plan said skip — surface the reason
+          stakeOutcome = `\n${renderAutoStakeStatus(stakePlan)}`;
+        }
+
+        const svmResult = await signAndSubmitSvm(svmPayload, key, undefined, svmFee, stakeIxs);
         await cleanSend(
           ctx,
           `${tokenMsg}\n\n<b>📡 Transaction Submitted</b>\n` +
             `<b>Signature:</b> <code>${svmResult.signature}</code>\n` +
-            `<b>Status:</b> ${svmResult.confirmation_status}`,
+            `<b>Status:</b> ${svmResult.confirmation_status}` +
+            stakeOutcome,
           mainMenuKeyboard(),
         );
         signed = true;

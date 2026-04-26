@@ -9,7 +9,7 @@ import {
   type EvmSubmitResult,
   type SvmPayload,
 } from '../../printr/signer.js';
-import { buildAutoStakeIxs } from '../../printr/stake.js';
+import { buildAutoStakeIxs, planAutoStake, renderAutoStakeStatus } from '../../printr/stake.js';
 import { walletStore } from '../../store/wallets.js';
 import { presetStore } from '../../store/presets.js';
 import { tokenStore } from '../../store/tokens.js';
@@ -227,15 +227,15 @@ async function showQuoteAndConfirm(ctx: BotContext) {
     blastrFeeLabel,
   });
 
-  // Build an auto-stake teaser line for the confirm screen, when applicable.
-  const willAutoStake =
-    preset.autoStakeInitial &&
-    preset.feeSink === 'stake_pool' &&
-    preset.initialBuySol > 0 &&
-    hasSolana;
-  const autoStakeLine = willAutoStake
-    ? `\n🔒 <b>Auto-stake:</b> initial buy locked ${preset.stakeLockPeriod}d in same tx (first-staker bonus)`
-    : '';
+  const stakePlan = planAutoStake({
+    feeSink: preset.feeSink,
+    initialBuySol: preset.initialBuySol,
+    hasSolanaChain: hasSolana,
+    autoStakeInitial: preset.autoStakeInitial,
+    stakeLockPeriod: preset.stakeLockPeriod,
+  });
+  const stakeStatusLine = renderAutoStakeStatus(stakePlan);
+  const autoStakeLine = stakeStatusLine ? `\n${stakeStatusLine}` : '';
 
   try {
     const quote = await printr.quote(quoteBody);
@@ -338,21 +338,20 @@ async function handleConfirm(ctx: BotContext) {
             : undefined;
 
         // ── Auto-stake the initial buy in the same atomic tx ──
-        // Only when fee sink is the stake pool, user opted in, there's an
-        // initial buy, and Printr returned the token mint + quote amount.
         let stakeIxs: TransactionInstruction[] | undefined;
+        let stakeOutcome = '';
         const svmPayload = payload as unknown as SvmPayload;
+        const stakePlan = planAutoStake({
+          feeSink: preset.feeSink,
+          initialBuySol: preset.initialBuySol,
+          hasSolanaChain: hasSolana,
+          autoStakeInitial: preset.autoStakeInitial,
+          stakeLockPeriod: preset.stakeLockPeriod,
+        });
         const initialBuyAmt = result.quote?.initial_buy_amount;
-        if (
-          preset.autoStakeInitial &&
-          preset.feeSink === 'stake_pool' &&
-          preset.initialBuySol > 0 &&
-          svmPayload.mint &&
-          initialBuyAmt
-        ) {
+        if (stakePlan.willStake && svmPayload.mint && initialBuyAmt) {
           try {
-            // 1% slippage buffer — actual buy may receive slightly less than quoted.
-            const toStake = (BigInt(initialBuyAmt) * 99n) / 100n;
+            const toStake = (BigInt(initialBuyAmt) * 99n) / 100n; // 1% slippage buffer
             const conn = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
             stakeIxs = await buildAutoStakeIxs({
               payloadIxs: svmPayload.ixs,
@@ -362,13 +361,15 @@ async function handleConfirm(ctx: BotContext) {
               lockPeriod: preset.stakeLockPeriod,
               connection: conn,
             });
-            logger.info({ userId, lock: preset.stakeLockPeriod, toStake: toStake.toString() }, 'auto-stake ixs built');
+            stakeOutcome = `\n🔒 Auto-staked initial buy → ${preset.stakeLockPeriod}d lock`;
+            logger.info({ userId, lock: preset.stakeLockPeriod, toStake: toStake.toString() }, 'auto-stake ixs built (quickLaunch)');
           } catch (err) {
-            // Don't block the launch on stake-build failure — log and let the
-            // launch proceed without auto-stake. User can stake manually after.
             logger.warn({ err, userId }, 'auto-stake ix build failed, proceeding without it');
+            stakeOutcome = `\n⚠️ Auto-stake skipped — build error. Stake manually on Printr.`;
             stakeIxs = undefined;
           }
+        } else if (preset.feeSink === 'stake_pool') {
+          stakeOutcome = `\n${renderAutoStakeStatus(stakePlan)}`;
         }
 
         const svmResult = await signAndSubmitSvm(svmPayload, key, undefined, svmFee, stakeIxs);
@@ -376,7 +377,8 @@ async function handleConfirm(ctx: BotContext) {
           ctx,
           `${tokenMsg}\n\n<b>📡 Transaction Submitted</b>\n` +
             `<b>Signature:</b> <code>${svmResult.signature}</code>\n` +
-            `<b>Status:</b> ${svmResult.confirmation_status}`,
+            `<b>Status:</b> ${svmResult.confirmation_status}` +
+            stakeOutcome,
           mainMenuKeyboard(),
         );
         signed = true;

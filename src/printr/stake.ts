@@ -320,3 +320,69 @@ export async function buildAutoStakeIxs(
 
 // Re-export the ws sol mint for callers that want to confirm quote-mint assumption.
 export { WSOL_MINT };
+
+// ── Pre-flight evaluator (called before/during the launch confirm) ──
+
+export type AutoStakePlanReason =
+  | 'ready'
+  | 'no-stake-pool-fee-sink'
+  | 'no-initial-buy'
+  | 'no-solana-chain'
+  | 'disabled-by-user';
+
+export interface AutoStakePlan {
+  /** True when conditions are met to build + execute auto-stake. */
+  willStake: boolean;
+  reason: AutoStakePlanReason;
+  /** Lock period to use if willStake is true. */
+  lockPeriod: LockPeriodDays;
+  /** Initial buy in human SOL units (display only). */
+  initialBuySol: number;
+}
+
+/**
+ * Decide whether auto-stake will happen for this launch and explain why
+ * (or why not). Used by both the confirm-screen status line and the
+ * post-launch result message so the user always knows what's happening.
+ */
+export function planAutoStake(args: {
+  feeSink: string;
+  initialBuySol: number;
+  hasSolanaChain: boolean;
+  autoStakeInitial: boolean;
+  stakeLockPeriod: LockPeriodDays;
+}): AutoStakePlan {
+  const base = { lockPeriod: args.stakeLockPeriod, initialBuySol: args.initialBuySol };
+  if (args.feeSink !== 'stake_pool') {
+    return { willStake: false, reason: 'no-stake-pool-fee-sink', ...base };
+  }
+  if (!args.autoStakeInitial) {
+    return { willStake: false, reason: 'disabled-by-user', ...base };
+  }
+  if (args.initialBuySol <= 0) {
+    return { willStake: false, reason: 'no-initial-buy', ...base };
+  }
+  if (!args.hasSolanaChain) {
+    return { willStake: false, reason: 'no-solana-chain', ...base };
+  }
+  return { willStake: true, reason: 'ready', ...base };
+}
+
+/** Render the plan as a short HTML line for the confirm/result screens. */
+export function renderAutoStakeStatus(plan: AutoStakePlan): string {
+  if (plan.willStake) {
+    return `🔒 <b>Auto-stake:</b> initial buy → locked ${plan.lockPeriod}d (first-staker bonus)`;
+  }
+  switch (plan.reason) {
+    case 'no-stake-pool-fee-sink':
+      return ''; // Don't clutter when fee sink isn't stake_pool — irrelevant
+    case 'disabled-by-user':
+      return '🔒 <b>Auto-stake:</b> off (enable in /settings)';
+    case 'no-initial-buy':
+      return '🔒 <b>Auto-stake:</b> skipped — no initial buy (set Initial Buy in /settings)';
+    case 'no-solana-chain':
+      return '🔒 <b>Auto-stake:</b> Solana-only (skipped)';
+    default:
+      return '';
+  }
+}
