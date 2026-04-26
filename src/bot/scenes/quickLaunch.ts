@@ -18,8 +18,8 @@ import {
   confirmKeyboard,
   mainMenuKeyboard,
   socialsPromptKeyboard,
-  justMenu,
-  withMenu,
+  justNav,
+  withNav,
 } from '../keyboards.js';
 import {
   formatQuote,
@@ -47,15 +47,49 @@ function getCbData(ctx: BotContext): string | undefined {
   return ctx.callbackQuery && 'data' in ctx.callbackQuery ? ctx.callbackQuery.data : undefined;
 }
 
-function skipButton() {
+/** Skip + nav row. showBack=false on step 0 (no previous step to return to). */
+function skipButton(showBack = true) {
+  const navButtons = showBack
+    ? [
+        { text: '← Back', callback_data: 'wiz:back' },
+        { text: '🏠 Menu', callback_data: 'action:start' },
+      ]
+    : [{ text: '🏠 Menu', callback_data: 'action:start' }];
   return {
     reply_markup: {
       inline_keyboard: [
         [{ text: '⏭ Skip', callback_data: 'skip' }],
-        [{ text: '🏠 Menu', callback_data: 'action:start' }],
+        navButtons,
       ],
     },
   };
+}
+
+// ── Step prompts ──
+// Each prompt is a standalone fn so the back handler can re-call it after
+// decrementing wizard.cursor. Step 0 has no back (justNav(false)).
+
+async function promptName(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    '⚡ <b>Quick Launch</b>\n\nUses your saved Quick Launch preset. ' +
+      'Adjust defaults anytime via <b>⚙️ Settings</b>.\n\n' +
+      'What should your token be called? <i>(1-32 characters)</i>',
+    justNav(false),
+  );
+}
+async function promptSymbol(ctx: BotContext) {
+  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars)</i>', justNav(true));
+}
+async function promptImage(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    '🖼 <b>Token Image</b>\n\nSend a photo for your token logo <i>(JPEG or PNG, max 4MB)</i>.\n\nTap <b>Skip</b> to launch without an image.',
+    skipButton(true),
+  );
+}
+async function promptSocials(ctx: BotContext) {
+  await cleanSend(ctx, SOCIALS_PROMPT, withNav(socialsPromptKeyboard(), true));
 }
 
 // ── Step 0: Name ──
@@ -63,11 +97,11 @@ async function receiveName(ctx: BotContext) {
   const text = getText(ctx);
   if (!text) return;
   if (text.length < 1 || text.length > 32) {
-    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:', justMenu());
+    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:', justNav(false));
     return;
   }
   ctx.session.launch.name = text;
-  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars)</i>', justMenu());
+  await promptSymbol(ctx);
   return ctx.wizard.next();
 }
 
@@ -76,15 +110,11 @@ async function receiveSymbol(ctx: BotContext) {
   const text = getText(ctx);
   if (!text) return;
   if (text.length < 1 || text.length > 10) {
-    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:', justMenu());
+    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:', justNav(true));
     return;
   }
   ctx.session.launch.symbol = text.toUpperCase();
-  await cleanSend(
-    ctx,
-    '🖼 <b>Token Image</b>\n\nSend a photo for your token logo <i>(JPEG or PNG, max 4MB)</i>.\n\nTap <b>Skip</b> to launch without an image.',
-    skipButton(),
-  );
+  await promptImage(ctx);
   return ctx.wizard.next();
 }
 
@@ -103,7 +133,7 @@ async function receiveImage(ctx: BotContext) {
       ctx.session.launch.image = buffer.toString('base64');
       await deleteUserMsg(ctx);
     } catch {
-      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton());
+      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton(true));
       return;
     }
   } else if (
@@ -118,14 +148,14 @@ async function receiveImage(ctx: BotContext) {
       ctx.session.launch.image = buffer.toString('base64');
       await deleteUserMsg(ctx);
     } catch {
-      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton());
+      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton(true));
       return;
     }
   } else {
     return;
   }
 
-  await cleanSend(ctx, SOCIALS_PROMPT, withMenu(socialsPromptKeyboard()));
+  await promptSocials(ctx);
   return ctx.wizard.next();
 }
 
@@ -419,12 +449,20 @@ export const quickLaunchScene = new Scenes.WizardScene<BotContext>(
 
 quickLaunchScene.enter(async (ctx) => {
   ctx.session.launch = { chains: [] };
-  await cleanSend(
-    ctx,
-    '⚡ <b>Quick Launch</b>\n\nUses your saved Quick Launch preset. ' +
-      'Adjust defaults anytime via <b>⚙️ Settings</b>.\n\n' +
-      'What should your token be called? <i>(1-32 characters)</i>',
-  );
+  await promptName(ctx);
+});
+
+// ── Back navigation ──
+// Map wizard cursor → re-prompt fn for the (cursor-1) step.
+const STEP_PROMPTS = [promptName, promptSymbol, promptImage, promptSocials];
+
+quickLaunchScene.action('wiz:back', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const cur = ctx.wizard.cursor;
+  if (cur === 0) return; // no previous step
+  ctx.wizard.selectStep(cur - 1);
+  const promptFn = STEP_PROMPTS[cur - 1];
+  if (promptFn) await promptFn(ctx);
 });
 
 quickLaunchScene.command('cancel', async (ctx) => {

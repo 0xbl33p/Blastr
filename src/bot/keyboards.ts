@@ -343,21 +343,40 @@ export function confirmKeyboard() {
   ]);
 }
 
-// ── Wizard escape hatch ──
-// Every step of the launch wizard needs a way out for users who fat-finger an
-// answer. action:start is already wired in both scenes to leave + return to
-// the main menu, so we just bolt a "Menu" row onto every prompt's keyboard.
+// ── Wizard navigation ──
+// Every step of the launch wizard needs (a) a way out (Menu) and (b) on steps
+// past the first, a way back to the previous prompt. Both scenes wire
+// action:start (exit) and wiz:back (re-prompt previous step).
 
 const wizardMenuButton = Markup.button.callback('🏠 Menu', 'action:start');
+const wizardBackButton = Markup.button.callback('← Back', 'wiz:back');
 
-export function justMenu() {
-  return Markup.inlineKeyboard([[wizardMenuButton]]);
+function navRow(showBack: boolean) {
+  return showBack ? [wizardBackButton, wizardMenuButton] : [wizardMenuButton];
 }
 
-/** Append a "Menu" row to an existing inline keyboard. */
-export function withMenu(kb: ReturnType<typeof Markup.inlineKeyboard>) {
+/** Just the nav row (Back + Menu, or Menu only on step 0). */
+export function justNav(showBack = true) {
+  return Markup.inlineKeyboard([navRow(showBack)]);
+}
+
+/** Append a nav row to an existing inline keyboard. */
+export function withNav(
+  kb: ReturnType<typeof Markup.inlineKeyboard>,
+  showBack = true,
+) {
   return Markup.inlineKeyboard([
     ...kb.reply_markup.inline_keyboard,
-    [wizardMenuButton],
+    navRow(showBack),
   ]);
+}
+
+// ── Legacy aliases (no back button) ──
+// Used by non-wizard flows (wallet manager, settings) where there's no notion
+// of a "previous step" to return to.
+export function justMenu() {
+  return justNav(false);
+}
+export function withMenu(kb: ReturnType<typeof Markup.inlineKeyboard>) {
+  return withNav(kb, false);
 }

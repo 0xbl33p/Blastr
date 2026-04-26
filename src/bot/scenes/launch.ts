@@ -20,8 +20,8 @@ import {
   ammFeeKeyboard,
   feeSinkKeyboard,
   socialsPromptKeyboard,
-  justMenu,
-  withMenu,
+  justNav,
+  withNav,
 } from '../keyboards.js';
 import type { FeeSink, MaxTelecoinSupply } from '../../printr/types.js';
 import { parseSocials, cleanExternalLinks, SOCIALS_PROMPT } from '../socials.js';
@@ -64,15 +64,103 @@ function getCbData(ctx: BotContext): string | undefined {
     : undefined;
 }
 
-function skipButton() {
+function skipButton(showBack = true) {
+  const navButtons = showBack
+    ? [
+        { text: '← Back', callback_data: 'wiz:back' },
+        { text: '🏠 Menu', callback_data: 'action:start' },
+      ]
+    : [{ text: '🏠 Menu', callback_data: 'action:start' }];
   return {
     reply_markup: {
       inline_keyboard: [
         [{ text: '⏭ Skip', callback_data: 'skip' }],
-        [{ text: '🏠 Menu', callback_data: 'action:start' }],
+        navButtons,
       ],
     },
   };
+}
+
+// ── Step prompts ──
+// Each prompt is a standalone fn so the back handler can re-call it after
+// decrementing wizard.cursor. Mapping: STEP_PROMPTS[N] re-prompts step N.
+// Step 0 has no back. Step 14 (confirm) has its own Cancel — no back.
+
+async function promptName(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    '🚀 <b>Launch a new token</b>\n\nWhat should your token be called? <i>(1-32 characters)</i>',
+    justNav(false),
+  );
+}
+async function promptSymbol(ctx: BotContext) {
+  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars, e.g. BLASTR)</i>', justNav(true));
+}
+async function promptDescription(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    'Token description? <i>(max 500 chars)</i>\n\nTap <b>Skip</b> to leave blank.',
+    skipButton(true),
+  );
+}
+async function promptSocials(ctx: BotContext) {
+  await cleanSend(ctx, SOCIALS_PROMPT, withNav(socialsPromptKeyboard(), true));
+}
+async function promptImage(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    '🖼 <b>Token Image</b>\n\nSend a photo for your token logo <i>(JPEG or PNG, max 4MB)</i>.\n\nTap <b>Skip</b> to launch without an image.',
+    skipButton(true),
+  );
+}
+async function promptChains(ctx: BotContext) {
+  const userId = ctx.from!.id.toString();
+  const walletTypes = await walletStore.getUserWalletTypes(userId);
+  const selected = ctx.session.launch.chains ?? [];
+  await cleanSend(ctx, 'Select the chain(s) to deploy on:', withNav(chainKeyboard(selected, walletTypes), true));
+}
+async function promptInitialBuy(ctx: BotContext) {
+  await cleanSend(ctx, 'How much SOL for the initial buy?\n\n<i>Enter 0 to skip, or an amount like 0.5</i>', justNav(true));
+}
+async function promptGraduation(ctx: BotContext) {
+  await cleanSend(ctx, 'Graduation threshold per chain:', withNav(graduationKeyboard(), true));
+}
+async function promptAdvancedToggle(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    '🛠 <b>Launch mode</b>\n\n' +
+      '<b>Quick:</b> use sensible defaults (1B supply, 70% curve, 1% bonding fee, 0.5% AMM fee, fees → creator)\n\n' +
+      '<b>Advanced:</b> customize supply, curve ratio, creator fees, and fee sink.',
+    withNav(advancedToggleKeyboard(), true),
+  );
+}
+async function promptMaxSupply(ctx: BotContext) {
+  await cleanSend(ctx, '🪙 <b>Max supply</b>\n\nTotal token supply at graduation.', withNav(maxSupplyKeyboard(), true));
+}
+async function promptSupplyRatio(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    '📈 <b>Bonding curve supply ratio</b>\n\n' +
+      'Percent of supply sold on the bonding curve. The rest is deposited into the AMM at graduation.',
+    withNav(supplyRatioKeyboard(), true),
+  );
+}
+async function promptBondingFee(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    '💵 <b>Bonding curve dev fee</b>\n\nYour cut of trading fees while on the curve (0-1.5%).',
+    withNav(bondingFeeKeyboard(), true),
+  );
+}
+async function promptAmmFee(ctx: BotContext) {
+  await cleanSend(
+    ctx,
+    '💵 <b>AMM dev fee</b>\n\nYour cut of trading fees after graduation (0-0.8%).',
+    withNav(ammFeeKeyboard(), true),
+  );
+}
+async function promptFeeSink(ctx: BotContext) {
+  await cleanSend(ctx, '🎯 <b>Fee sink</b>\n\nWhere collected fees route.', withNav(feeSinkKeyboard(), true));
 }
 
 // ── Step 0: Receive name, ask symbol ──
@@ -80,11 +168,11 @@ async function receiveName(ctx: BotContext) {
   const text = getText(ctx);
   if (!text) return;
   if (text.length < 1 || text.length > 32) {
-    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:', justMenu());
+    await cleanSend(ctx, 'Name must be 1-32 characters. Try again:', justNav(false));
     return;
   }
   ctx.session.launch.name = text;
-  await cleanSend(ctx, 'What ticker symbol? <i>(1-10 chars, e.g. BLASTR)</i>', justMenu());
+  await promptSymbol(ctx);
   return ctx.wizard.next();
 }
 
@@ -93,15 +181,11 @@ async function receiveSymbol(ctx: BotContext) {
   const text = getText(ctx);
   if (!text) return;
   if (text.length < 1 || text.length > 10) {
-    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:', justMenu());
+    await cleanSend(ctx, 'Symbol must be 1-10 characters. Try again:', justNav(true));
     return;
   }
   ctx.session.launch.symbol = text.toUpperCase();
-  await cleanSend(
-    ctx,
-    'Token description? <i>(max 500 chars)</i>\n\nTap <b>Skip</b> to leave blank.',
-    skipButton(),
-  );
+  await promptDescription(ctx);
   return ctx.wizard.next();
 }
 
@@ -117,7 +201,7 @@ async function receiveDescription(ctx: BotContext) {
   } else {
     return;
   }
-  await cleanSend(ctx, SOCIALS_PROMPT, withMenu(socialsPromptKeyboard()));
+  await promptSocials(ctx);
   return ctx.wizard.next();
 }
 
@@ -133,11 +217,7 @@ async function receiveSocials(ctx: BotContext) {
   } else {
     return;
   }
-  await cleanSend(
-    ctx,
-    '🖼 <b>Token Image</b>\n\nSend a photo for your token logo <i>(JPEG or PNG, max 4MB)</i>.\n\nTap <b>Skip</b> to launch without an image.',
-    skipButton(),
-  );
+  await promptImage(ctx);
   return ctx.wizard.next();
 }
 
@@ -156,7 +236,7 @@ async function receiveImage(ctx: BotContext) {
       ctx.session.launch.image = buffer.toString('base64');
       await deleteUserMsg(ctx);
     } catch {
-      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton());
+      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton(true));
       return;
     }
   } else if (ctx.message && 'document' in ctx.message && ctx.message.document?.mime_type?.startsWith('image/')) {
@@ -167,18 +247,14 @@ async function receiveImage(ctx: BotContext) {
       ctx.session.launch.image = buffer.toString('base64');
       await deleteUserMsg(ctx);
     } catch {
-      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton());
+      await cleanSend(ctx, '⚠️ Failed to process image. Try again or tap <b>Skip</b>.', skipButton(true));
       return;
     }
   } else {
     return;
   }
 
-  // Chain gating: only show chains matching user's wallet types
-  const userId = ctx.from!.id.toString();
-  const walletTypes = await walletStore.getUserWalletTypes(userId);
-  const selected = ctx.session.launch.chains ?? [];
-  await cleanSend(ctx, 'Select the chain(s) to deploy on:', withMenu(chainKeyboard(selected, walletTypes)));
+  await promptChains(ctx);
   return ctx.wizard.next();
 }
 
@@ -191,7 +267,7 @@ async function handleChainSelection(ctx: BotContext) {
   if (data === 'chains:done') {
     const chains = ctx.session.launch.chains ?? [];
     if (chains.length === 0) return;
-    await cleanSend(ctx, 'How much SOL for the initial buy?\n\n<i>Enter 0 to skip, or an amount like 0.5</i>', justMenu());
+    await promptInitialBuy(ctx);
     return ctx.wizard.next();
   }
 
@@ -217,11 +293,11 @@ async function receiveInitialBuy(ctx: BotContext) {
   if (!text) return;
   const amount = parseFloat(text.replace(/[$,]/g, ''));
   if (isNaN(amount) || amount < 0) {
-    await cleanSend(ctx, 'Invalid amount. Enter a number in SOL <i>(e.g. 0.5, or 0 to skip)</i>:', justMenu());
+    await cleanSend(ctx, 'Invalid amount. Enter a number in SOL <i>(e.g. 0.5, or 0 to skip)</i>:', justNav(true));
     return;
   }
   ctx.session.launch.initialBuySol = amount;
-  await cleanSend(ctx, 'Graduation threshold per chain:', withMenu(graduationKeyboard()));
+  await promptGraduation(ctx);
   return ctx.wizard.next();
 }
 
@@ -234,13 +310,7 @@ async function receiveGraduation(ctx: BotContext) {
   const threshold = parseInt(data.slice(5), 10);
   ctx.session.launch.graduationThreshold = threshold;
 
-  await cleanSend(
-    ctx,
-    '🛠 <b>Launch mode</b>\n\n' +
-      '<b>Quick:</b> use sensible defaults (1B supply, 70% curve, 1% bonding fee, 0.5% AMM fee, fees → creator)\n\n' +
-      '<b>Advanced:</b> customize supply, curve ratio, creator fees, and fee sink.',
-    withMenu(advancedToggleKeyboard()),
-  );
+  await promptAdvancedToggle(ctx);
   return ctx.wizard.next();
 }
 
@@ -261,7 +331,7 @@ async function handleAdvancedToggle(ctx: BotContext) {
   }
 
   if (data === 'adv:open') {
-    await cleanSend(ctx, '🪙 <b>Max supply</b>\n\nTotal token supply at graduation.', withMenu(maxSupplyKeyboard()));
+    await promptMaxSupply(ctx);
     return ctx.wizard.next();
   }
 }
@@ -272,12 +342,7 @@ async function handleMaxSupply(ctx: BotContext) {
   if (!data || !data.startsWith('supply:')) return;
   await ctx.answerCbQuery().catch(() => {});
   ctx.session.launch.maxSupply = data.slice(7) as MaxTelecoinSupply;
-  await cleanSend(
-    ctx,
-    '📈 <b>Bonding curve supply ratio</b>\n\n' +
-      'Percent of supply sold on the bonding curve. The rest is deposited into the AMM at graduation.',
-    withMenu(supplyRatioKeyboard()),
-  );
+  await promptSupplyRatio(ctx);
   return ctx.wizard.next();
 }
 
@@ -287,11 +352,7 @@ async function handleSupplyRatio(ctx: BotContext) {
   if (!data || !data.startsWith('ratio:')) return;
   await ctx.answerCbQuery().catch(() => {});
   ctx.session.launch.supplyOnCurveBps = parseInt(data.slice(6), 10);
-  await cleanSend(
-    ctx,
-    '💵 <b>Bonding curve dev fee</b>\n\nYour cut of trading fees while on the curve (0-1.5%).',
-    withMenu(bondingFeeKeyboard()),
-  );
+  await promptBondingFee(ctx);
   return ctx.wizard.next();
 }
 
@@ -301,11 +362,7 @@ async function handleBondingFee(ctx: BotContext) {
   if (!data || !data.startsWith('bond:')) return;
   await ctx.answerCbQuery().catch(() => {});
   ctx.session.launch.bondingCurveDevFeeBps = parseInt(data.slice(5), 10);
-  await cleanSend(
-    ctx,
-    '💵 <b>AMM dev fee</b>\n\nYour cut of trading fees after graduation (0-0.8%).',
-    withMenu(ammFeeKeyboard()),
-  );
+  await promptAmmFee(ctx);
   return ctx.wizard.next();
 }
 
@@ -315,11 +372,7 @@ async function handleAmmFee(ctx: BotContext) {
   if (!data || !data.startsWith('amm:')) return;
   await ctx.answerCbQuery().catch(() => {});
   ctx.session.launch.ammDevFeeBps = parseInt(data.slice(4), 10);
-  await cleanSend(
-    ctx,
-    '🎯 <b>Fee sink</b>\n\nWhere collected fees route.',
-    withMenu(feeSinkKeyboard()),
-  );
+  await promptFeeSink(ctx);
   return ctx.wizard.next();
 }
 
@@ -565,10 +618,36 @@ export const launchScene = new Scenes.WizardScene<BotContext>(
 // Enter handler
 launchScene.enter(async (ctx) => {
   ctx.session.launch = { chains: [] };
-  await cleanSend(
-    ctx,
-    '🚀 <b>Launch a new token</b>\n\nWhat should your token be called? <i>(1-32 characters)</i>',
-  );
+  await promptName(ctx);
+});
+
+// ── Back navigation ──
+// STEP_PROMPTS[N] re-prompts the input that step N expects. Triggered by
+// the "← Back" button which fires `wiz:back`.
+const STEP_PROMPTS = [
+  promptName,             // 0
+  promptSymbol,           // 1
+  promptDescription,      // 2
+  promptSocials,          // 3
+  promptImage,            // 4
+  promptChains,           // 5
+  promptInitialBuy,       // 6
+  promptGraduation,       // 7
+  promptAdvancedToggle,   // 8
+  promptMaxSupply,        // 9
+  promptSupplyRatio,      // 10
+  promptBondingFee,       // 11
+  promptAmmFee,           // 12
+  promptFeeSink,          // 13
+];
+
+launchScene.action('wiz:back', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const cur = ctx.wizard.cursor;
+  if (cur === 0) return; // no previous step
+  ctx.wizard.selectStep(cur - 1);
+  const promptFn = STEP_PROMPTS[cur - 1];
+  if (promptFn) await promptFn(ctx);
 });
 
 // Allow commands/buttons to break out of wizard
