@@ -54,6 +54,12 @@ export const config = {
   blastrFeeRecipientSvm: process.env.BLASTR_FEE_RECIPIENT_SVM ?? '',
   blastrFeeWei: process.env.BLASTR_FEE_WEI ?? '0',
   blastrFeeRecipientEvm: process.env.BLASTR_FEE_RECIPIENT_EVM ?? '',
+
+  // ── launch feed (public channel) ──
+  // Optional. When set, every successful launch is posted anonymously to
+  // this Telegram channel. Bot must be admin with "Post Messages" perm.
+  // Accepts either "@channelusername" or a numeric "-100..." id.
+  launchFeedChannelId: process.env.LAUNCH_FEED_CHANNEL_ID ?? '',
 } as const;
 
 export function validateConfig(): void {

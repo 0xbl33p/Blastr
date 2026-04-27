@@ -8,7 +8,7 @@ import type { SvmPayload, EvmSubmitResult } from '../../printr/signer.js';
 import { walletStore } from '../../store/wallets.js';
 import { tokenStore } from '../../store/tokens.js';
 import { presetStore } from '../../store/presets.js';
-import { buildAutoStakeIxs, planAutoStake, renderAutoStakeStatus } from '../../printr/stake.js';
+import { buildAutoStakeIxs, planAutoStake, renderAutoStakeStatus, type AutoStakePlan } from '../../printr/stake.js';
 import { extractSwapContext, normalizeMint } from '../../printr/sell.js';
 import { Connection, PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import {
@@ -34,6 +34,7 @@ import { parseSocials, cleanExternalLinks, SOCIALS_PROMPT } from '../socials.js'
 import { appendBlastrTag } from '../signature.js';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { logger } from '../../logger.js';
+import { publishLaunch } from '../launchFeed.js';
 
 const DEFAULTS = {
   maxSupply: '1_billion' as MaxTelecoinSupply,
@@ -596,6 +597,12 @@ async function handleConfirm(ctx: BotContext) {
     // Auto-sign with the matching wallet
     let signed = false;
 
+    // Captured for the public launch feed at the end. Only set on actual
+    // submit success — never on signing failures or aborted auto-stake.
+    let publishSig: string | undefined;
+    let publishHash: string | undefined;
+    let publishStakePlan: AutoStakePlan | undefined;
+
     if (hasSolana && svmWallet && (payload as unknown as SvmPayload).ixs) {
       await cleanSend(ctx, `${tokenMsg}\n\n⏳ Signing Solana transaction...`);
       try {
@@ -706,6 +713,8 @@ async function handleConfirm(ctx: BotContext) {
         }
 
         const svmResult = await signAndSubmitSvm(svmPayload, key, undefined, svmFee, stakeIxs);
+        publishSig = svmResult.signature;
+        publishStakePlan = stakePlan;
         const successMsg =
           `${tokenMsg}\n\n<b>📡 Transaction Submitted</b>\n` +
           `<b>Signature:</b> <code>${svmResult.signature}</code>\n` +
@@ -737,6 +746,7 @@ async function handleConfirm(ctx: BotContext) {
             ? { recipient: config.blastrFeeRecipientEvm, wei: config.blastrFeeWei }
             : undefined;
         const evmResult = await signAndSubmitEvm(payload as unknown as EvmPayload, key, undefined, evmFee);
+        publishHash = evmResult.tx_hash;
         await cleanSend(
           ctx,
           `${tokenMsg}\n\n${formatTxResult(evmResult.tx_hash, evmResult.tx_status)}`,
@@ -749,6 +759,23 @@ async function handleConfirm(ctx: BotContext) {
         await cleanSend(ctx, `${tokenMsg}\n\n❌ EVM signing failed: ${esc(errMsg)}`, mainMenuKeyboard());
         signed = true;
       }
+    }
+
+    // Anonymous announce to the public launch feed — fire-and-forget. Only
+    // posts when at least one chain actually submitted; helper no-ops if
+    // LAUNCH_FEED_CHANNEL_ID isn't configured.
+    if (publishSig || publishHash) {
+      void publishLaunch(ctx.telegram, {
+        name: launch.name!,
+        symbol: launch.symbol!,
+        chains,
+        tokenId: result.token_id,
+        imageBase64: launch.image || undefined,
+        signature: publishSig,
+        txHash: publishHash,
+        stakePlan: publishStakePlan,
+        appUrl,
+      });
     }
 
     if (!signed) {

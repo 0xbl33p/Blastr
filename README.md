@@ -101,6 +101,7 @@ This pulls from the on-chain IDL PDA, diffs against `src/printr/idl.json`, print
 - **Crash isolation** — Telegraf `bot.catch` + `uncaughtException` boundaries keep one bad update from killing the process.
 - **Atomic auto-stake** — when fee sink is `stake_pool`, the launch tx bundles `print_telecoin2` (create) + `swap` (initial buy) + `refresh_staking2` + `create_stake_position` in one Solana versioned transaction. Either the whole launch+stake lands together, or nothing does. Lookup tables keep the tx under the 1232-byte cap.
 - **Treasury fee** — a configurable `BLASTR_FEE_SOL` (default 0.05) is prepended to the launch tx as a transfer to `BLASTR_FEE_RECIPIENT_SVM`. Same atomic guarantees: fee + launch succeed or fail together.
+- **Anonymous launch feed** — set `LAUNCH_FEED_CHANNEL_ID` to a Telegram channel id (or `@username`) and the bot posts every successful launch (token name, symbol, chain, image, Printr link) anonymously. No user identifiers are ever included. Add the bot as a channel admin with "Post Messages" permission.
 
 ## Roadmap
 
