@@ -76,12 +76,16 @@ class TokenStore {
     return rows.map(rowToRecord);
   }
 
-  /** Fetch a single token belonging to the user (for the trade panel). */
-  async getByTokenId(userId: string, tokenId: string): Promise<UserTokenRecord | undefined> {
+  /** Fetch a single token belonging to the user. Accepts either a full token_id
+   *  or a short prefix (Telegram's 64-byte callback_data limit forces us to
+   *  truncate when round-tripping the id through buttons). Hex/base58 token
+   *  ids contain no LIKE wildcards (`%` / `_`), so the prefix match is safe. */
+  async getByTokenId(userId: string, tokenIdOrPrefix: string): Promise<UserTokenRecord | undefined> {
     const [row] = await sql<UserTokenRow[]>`
       SELECT token_id, symbol, name, chains, created_at, swap_context
       FROM user_tokens
-      WHERE user_id = ${userId} AND token_id = ${tokenId}
+      WHERE user_id = ${userId} AND token_id LIKE ${tokenIdOrPrefix + '%'}
+      ORDER BY created_at DESC
       LIMIT 1
     `;
     return row ? rowToRecord(row) : undefined;

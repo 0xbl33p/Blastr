@@ -25,7 +25,7 @@ import { tokenStore, type UserTokenRecord } from '../store/tokens.js';
 import { walletStore } from '../store/wallets.js';
 import { buildSellIx, getTelecoinBalance } from '../printr/sell.js';
 import { cleanSend } from './helpers.js';
-import { mainMenuKeyboard } from './keyboards.js';
+import { mainMenuKeyboard, shortTokenId } from './keyboards.js';
 import { esc } from './format.js';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
@@ -49,27 +49,29 @@ function solanaConn(): Connection {
 // ── keyboards ──
 
 export function tradePanelKeyboard(tokenId: string) {
+  const sid = shortTokenId(tokenId);
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback('Sell 25%', `trade:sell:${tokenId}:25`),
-      Markup.button.callback('Sell 50%', `trade:sell:${tokenId}:50`),
+      Markup.button.callback('Sell 25%', `trade:sell:${sid}:25`),
+      Markup.button.callback('Sell 50%', `trade:sell:${sid}:50`),
     ],
     [
-      Markup.button.callback('Sell 75%', `trade:sell:${tokenId}:75`),
-      Markup.button.callback('Sell 100%', `trade:sell:${tokenId}:100`),
+      Markup.button.callback('Sell 75%', `trade:sell:${sid}:75`),
+      Markup.button.callback('Sell 100%', `trade:sell:${sid}:100`),
     ],
     [
-      Markup.button.callback('🔄 Refresh', `trade:open:${tokenId}`),
-      Markup.button.callback('❌ Close', `trade:close:${tokenId}`),
+      Markup.button.callback('🔄 Refresh', `trade:open:${sid}`),
+      Markup.button.callback('❌ Close', `trade:close:${sid}`),
     ],
   ]);
 }
 
 function confirmSellKeyboard(tokenId: string, percent: number) {
+  const sid = shortTokenId(tokenId);
   return Markup.inlineKeyboard([
     [
-      Markup.button.callback('✅ Confirm', `trade:do:${tokenId}:${percent}`),
-      Markup.button.callback('❌ Cancel', `trade:open:${tokenId}`),
+      Markup.button.callback('✅ Confirm', `trade:do:${sid}:${percent}`),
+      Markup.button.callback('❌ Cancel', `trade:open:${sid}`),
     ],
   ]);
 }

@@ -343,10 +343,19 @@ export function confirmKeyboard() {
   ]);
 }
 
+/** Telegram callback_data is capped at 64 bytes. Printr token_ids are 66 chars
+ *  (0x + 64 hex), so we truncate to 16 chars and let the lookup do a prefix
+ *  match. 16 hex chars = 64 bits → no realistic per-user collision. */
+const SHORT_ID_LEN = 16;
+export function shortTokenId(tokenId: string): string {
+  return tokenId.slice(0, SHORT_ID_LEN);
+}
+
 /** Post-launch keyboard: deep link to Trade panel + main menu. */
 export function postLaunchKeyboard(tokenId: string) {
+  const sid = shortTokenId(tokenId);
   return Markup.inlineKeyboard([
-    [Markup.button.callback('💱 Open Trade Panel', `trade:open:${tokenId}`)],
+    [Markup.button.callback('💱 Open Trade Panel', `trade:open:${sid}`)],
     [Markup.button.callback('🏠 Main menu', 'action:start')],
   ]);
 }

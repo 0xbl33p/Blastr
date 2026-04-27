@@ -382,14 +382,17 @@ async function handleConfirm(ctx: BotContext) {
         }
 
         const svmResult = await signAndSubmitSvm(svmPayload, key, undefined, svmFee, stakeIxs);
-        await cleanSend(
-          ctx,
+        const successMsg =
           `${tokenMsg}\n\n<b>📡 Transaction Submitted</b>\n` +
-            `<b>Signature:</b> <code>${svmResult.signature}</code>\n` +
-            `<b>Status:</b> ${svmResult.confirmation_status}` +
-            stakeOutcome,
-          postLaunchKeyboard(result.token_id),
-        );
+          `<b>Signature:</b> <code>${svmResult.signature}</code>\n` +
+          `<b>Status:</b> ${svmResult.confirmation_status}` +
+          stakeOutcome;
+        try {
+          await cleanSend(ctx, successMsg, postLaunchKeyboard(result.token_id));
+        } catch (renderErr) {
+          logger.warn({ err: renderErr, userId, sig: svmResult.signature }, 'post-launch render failed');
+          await cleanSend(ctx, successMsg, mainMenuKeyboard());
+        }
         signed = true;
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : 'Unknown error';
