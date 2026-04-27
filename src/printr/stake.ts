@@ -32,7 +32,11 @@ const WSOL_MINT = new PublicKey('So11111111111111111111111111111111111111112');
 // ── instruction discriminators (verified against on-chain IDL) ──
 const DISC_CREATE_STAKE_POSITION = Buffer.from([0x5c, 0xa8, 0x60, 0x85, 0x66, 0x79, 0x56, 0x8a]);
 const DISC_REFRESH_STAKING_2 = Buffer.from([0x24, 0xc5, 0xc3, 0x1b, 0x08, 0xe0, 0x76, 0x1b]);
-const DISC_SWAP = Buffer.from([0xf8, 0xc6, 0x9e, 0x91, 0xe1, 0x75, 0x87, 0xc8]); // global:swap
+// print_telecoin2 (current) and print_telecoin (legacy) — both have identical
+// account layouts. Printr's launch payload contains the print_telecoin* ix at
+// the top level; the actual `Swap` (initial buy) is a CPI inside it.
+const DISC_PRINT_TELECOIN_2 = Buffer.from([0xa6, 0x3c, 0x26, 0x2b, 0xee, 0x20, 0x02, 0xa0]);
+const DISC_PRINT_TELECOIN = Buffer.from([0xd6, 0x1e, 0x04, 0x66, 0xcf, 0x49, 0x6c, 0x23]);
 
 // ── lock period enum (matches Printr's IDL ordering) ──
 export type LockPeriodDays = 7 | 14 | 30 | 60 | 90 | 180;
@@ -116,9 +120,14 @@ export async function loadPrintrConfig(connection: Connection): Promise<PrintrCo
 
 /**
  * Pull the dbc_config / dbc_pool / quote_mint pubkeys out of Printr's launch
- * payload by locating the swap instruction in the bundle. These are per-token
- * values that aren't derivable from the mint alone — Printr knows them and
- * embeds them in the swap ix accounts (positions 7, 8, 5 per the IDL).
+ * payload by locating the print_telecoin* instruction. The `Swap` we see in
+ * on-chain logs is a CPI inside print_telecoin2, not a top-level ix, so we
+ * read these accounts from the print_telecoin* account list directly.
+ *
+ * print_telecoin2 + print_telecoin have identical layouts:
+ *   [4]  quote_mint
+ *   [9]  dbc_config
+ *   [11] dbc_pool
  */
 interface LaunchContextAccounts {
   dbcConfig: PublicKey;
@@ -130,25 +139,21 @@ export function extractStakeContextFromPayload(
   ixs: SvmInstruction[],
 ): LaunchContextAccounts {
   const printrProgramStr = PRINTR_PROGRAM.toBase58();
-  const swapIx = ixs.find(
-    (ix) =>
-      ix.program_id === printrProgramStr &&
-      Buffer.from(ix.data, 'base64').subarray(0, 8).equals(DISC_SWAP),
-  );
-  if (!swapIx) {
-    // Fall back to assuming wSOL quote — works for almost all launches today
-    // since Printr currently quotes everything in SOL. Throw later if dbc
-    // accounts are actually required and we couldn't find them.
+  const printIx = ixs.find((ix) => {
+    if (ix.program_id !== printrProgramStr) return false;
+    const data = Buffer.from(ix.data, 'base64');
+    const head = data.subarray(0, 8);
+    return head.equals(DISC_PRINT_TELECOIN_2) || head.equals(DISC_PRINT_TELECOIN);
+  });
+  if (!printIx) {
     throw new Error(
-      'no swap instruction found in launch payload — auto-stake needs the swap ix to extract dbc_config + dbc_pool',
+      'no print_telecoin instruction found in launch payload — auto-stake needs it to extract dbc_config + dbc_pool',
     );
   }
-  // Account order is fixed by the swap instruction's IDL definition:
-  //   [5] quote_mint, [7] dbc_config, [8] dbc_pool
   return {
-    quoteMint: new PublicKey(swapIx.accounts[5].pubkey),
-    dbcConfig: new PublicKey(swapIx.accounts[7].pubkey),
-    dbcPool: new PublicKey(swapIx.accounts[8].pubkey),
+    quoteMint: new PublicKey(printIx.accounts[4].pubkey),
+    dbcConfig: new PublicKey(printIx.accounts[9].pubkey),
+    dbcPool: new PublicKey(printIx.accounts[11].pubkey),
   };
 }
 
