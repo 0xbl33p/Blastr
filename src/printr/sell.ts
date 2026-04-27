@@ -38,6 +38,15 @@ const DISC_SWAP = Buffer.from([0xf8, 0xc6, 0x9e, 0x91, 0xe1, 0x75, 0x87, 0xc8]);
 
 const SELL_TELECOIN_VARIANT = 0x01;
 
+/** Normalize Printr's mint return value. They return the SPL mint as a CAIP-10
+ *  address (e.g. "solana:5eykt4Us...:5ybL2tyv..."), not a bare pubkey. The
+ *  pubkey is always the last colon-separated segment. Bare pubkeys (no colons)
+ *  pass through unchanged. */
+export function normalizeMint(mintOrCaip10: string): string {
+  const parts = mintOrCaip10.split(':');
+  return parts[parts.length - 1];
+}
+
 // PDA helpers (mirror src/printr/stake.ts)
 function findPda(seeds: (Buffer | Uint8Array)[], programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync(seeds, programId)[0];
@@ -82,7 +91,8 @@ export function extractSwapContext(
   const a = swapIx.accounts;
   if (a.length < 27) return null;
   return {
-    telecoinMint,
+    // Normalize so downstream consumers always have a bare pubkey.
+    telecoinMint: normalizeMint(telecoinMint),
     quoteMint: a[5].pubkey,
     dbcPoolAuthority: a[6].pubkey,
     dbcConfig: a[7].pubkey,

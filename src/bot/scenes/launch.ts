@@ -9,7 +9,7 @@ import { walletStore } from '../../store/wallets.js';
 import { tokenStore } from '../../store/tokens.js';
 import { presetStore } from '../../store/presets.js';
 import { buildAutoStakeIxs, planAutoStake, renderAutoStakeStatus } from '../../printr/stake.js';
-import { extractSwapContext } from '../../printr/sell.js';
+import { extractSwapContext, normalizeMint } from '../../printr/sell.js';
 import { Connection, PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import {
   chainKeyboard,
@@ -598,35 +598,54 @@ async function handleConfirm(ctx: BotContext) {
           'auto-stake decision (launch flow)',
         );
 
+        // Auto-stake is fail-CLOSED: if the user opted in and we can't build
+        // the stake ix, we abort the launch tx submission rather than ship a
+        // token that's missing the dev's first-staker position. Better to bail
+        // (and waste the ticker for 48h on Printr's anti-vamp lock) than to
+        // surprise the dev with an un-staked launch.
         if (stakePlan.willStake) {
-          if (!svmPayload.mint_address || !initialBuyAmt) {
-            // Plan says stake, but Printr's payload is missing fields we need.
-            // Don't show the false-positive "first-staker bonus" text.
-            logger.warn({ userId, hasMint: !!svmPayload.mint_address, hasInitialBuyAmt: !!initialBuyAmt }, 'auto-stake plan ready but payload incomplete');
-            stakeOutcome = `\n⚠️ Auto-stake skipped — Printr payload missing required fields (mint or quote amount). Stake manually on Printr.`;
-          } else {
-            try {
-              const toStake = (BigInt(initialBuyAmt) * 99n) / 100n; // 1% slippage buffer
-              const conn = new Connection(config.solanaRpcUrl, 'confirmed');
-              const lockForLaunch = launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
-              stakeIxs = await buildAutoStakeIxs({
-                payloadIxs: svmPayload.ixs,
-                owner: new PublicKey(svmWallet.address),
-                telecoinMint: new PublicKey(svmPayload.mint_address),
-                toStakeAmount: toStake,
-                lockPeriod: lockForLaunch,
-                connection: conn,
-              });
-              stakeOutcome = `\n🔒 Auto-staked initial buy → ${lockForLaunch}d lock`;
-              logger.info({ userId, lock: lockForLaunch, toStake: toStake.toString() }, 'auto-stake ixs built (launch flow)');
-            } catch (err) {
-              logger.warn({ err, userId }, 'auto-stake ix build failed, proceeding without it');
-              stakeOutcome = `\n⚠️ Auto-stake skipped — build error. Stake manually on Printr.`;
-              stakeIxs = undefined;
-            }
+          const mintForStake = svmPayload.mint_address ? normalizeMint(svmPayload.mint_address) : undefined;
+          if (!mintForStake || !initialBuyAmt) {
+            logger.warn(
+              { userId, hasMint: !!svmPayload.mint_address, hasInitialBuyAmt: !!initialBuyAmt },
+              'auto-stake plan ready but payload incomplete — aborting launch',
+            );
+            await cleanSend(
+              ctx,
+              `${tokenMsg}\n\n⚠️ <b>Launch aborted</b> — auto-stake setup failed (Printr payload missing mint or quote amount). The launch tx was not submitted.\n\n` +
+                `<i>Note: Printr may reserve your ticker for 48h. Use a different name to retry sooner, or switch fee sink to Creator/Buyback in /settings to launch without auto-stake.</i>`,
+              mainMenuKeyboard(),
+            );
+            signed = true;
+            return ctx.scene.leave();
+          }
+          try {
+            const toStake = (BigInt(initialBuyAmt) * 99n) / 100n;
+            const conn = new Connection(config.solanaRpcUrl, 'confirmed');
+            const lockForLaunch = launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
+            stakeIxs = await buildAutoStakeIxs({
+              payloadIxs: svmPayload.ixs,
+              owner: new PublicKey(svmWallet.address),
+              telecoinMint: new PublicKey(mintForStake),
+              toStakeAmount: toStake,
+              lockPeriod: lockForLaunch,
+              connection: conn,
+            });
+            stakeOutcome = `\n🔒 Auto-staked initial buy → ${lockForLaunch}d lock`;
+            logger.info({ userId, lock: lockForLaunch, toStake: toStake.toString() }, 'auto-stake ixs built (launch flow)');
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : 'unknown';
+            logger.warn({ err, userId }, 'auto-stake ix build failed — aborting launch');
+            await cleanSend(
+              ctx,
+              `${tokenMsg}\n\n⚠️ <b>Launch aborted</b> — auto-stake build failed: ${esc(errMsg)}\n\n` +
+                `<i>Note: Printr may reserve your ticker for 48h. Use a different name to retry sooner, or switch fee sink to Creator/Buyback in /settings to launch without auto-stake.</i>`,
+              mainMenuKeyboard(),
+            );
+            signed = true;
+            return ctx.scene.leave();
           }
         } else if (launch.feeSink === 'stake_pool') {
-          // fee sink IS stake_pool but plan said skip — surface the reason
           stakeOutcome = `\n${renderAutoStakeStatus(stakePlan)}`;
         }
 
