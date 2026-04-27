@@ -661,7 +661,19 @@ async function handleConfirm(ctx: BotContext) {
             return ctx.scene.leave();
           }
           try {
-            const toStake = (BigInt(initialBuyAmt) * 99n) / 100n;
+            // initial_buy_amount from Printr is in HUMAN units (whole tokens),
+            // not raw atomic units. Scale by 10^decimals to get the raw u64
+            // we pass to create_stake_position. Pull decimals from the asset
+            // metadata in the quote, defaulting to 9 (Printr standard).
+            const telecoinAsset = result.quote?.assets?.find(
+              (a) => a.symbol?.toUpperCase() === launch.symbol?.toUpperCase(),
+            );
+            const decimals = telecoinAsset?.decimals ?? 9;
+            const rawHumanAmt = BigInt(initialBuyAmt) * (10n ** BigInt(decimals));
+            // 95% buffer for curve slippage between quote and execution.
+            // First-buyer slippage on a fresh DBC is typically < 5%; if real
+            // launches start reverting with InsufficientFunds we lower further.
+            const toStake = (rawHumanAmt * 95n) / 100n;
             const conn = new Connection(config.solanaRpcUrl, 'confirmed');
             const lockForLaunch = launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
             stakeIxs = await buildAutoStakeIxs({
@@ -673,7 +685,10 @@ async function handleConfirm(ctx: BotContext) {
               connection: conn,
             });
             stakeOutcome = `\n🔒 Auto-staked initial buy → ${lockForLaunch}d lock`;
-            logger.info({ userId, lock: lockForLaunch, toStake: toStake.toString() }, 'auto-stake ixs built (launch flow)');
+            logger.info(
+              { userId, lock: lockForLaunch, decimals, humanAmt: initialBuyAmt, toStakeRaw: toStake.toString() },
+              'auto-stake ixs built (launch flow)',
+            );
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : 'unknown';
             logger.warn({ err, userId }, 'auto-stake ix build failed — aborting launch');

@@ -430,7 +430,13 @@ async function handleConfirm(ctx: BotContext) {
             return ctx.scene.leave();
           }
           try {
-            const toStake = (BigInt(initialBuyAmt) * 99n) / 100n;
+            // initial_buy_amount is in HUMAN units — see launch.ts for context.
+            const telecoinAsset = result.quote?.assets?.find(
+              (a) => a.symbol?.toUpperCase() === launch.symbol?.toUpperCase(),
+            );
+            const decimals = telecoinAsset?.decimals ?? 9;
+            const rawHumanAmt = BigInt(initialBuyAmt) * (10n ** BigInt(decimals));
+            const toStake = (rawHumanAmt * 95n) / 100n; // 5% slippage buffer
             const conn = new Connection(config.solanaRpcUrl, 'confirmed');
             const lockForLaunch = launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
             stakeIxs = await buildAutoStakeIxs({
@@ -442,7 +448,10 @@ async function handleConfirm(ctx: BotContext) {
               connection: conn,
             });
             stakeOutcome = `\n🔒 Auto-staked initial buy → ${lockForLaunch}d lock`;
-            logger.info({ userId, lock: lockForLaunch, toStake: toStake.toString() }, 'auto-stake ixs built (quickLaunch)');
+            logger.info(
+              { userId, lock: lockForLaunch, decimals, humanAmt: initialBuyAmt, toStakeRaw: toStake.toString() },
+              'auto-stake ixs built (quickLaunch)',
+            );
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : 'unknown';
             logger.warn({ err, userId }, 'auto-stake ix build failed — aborting launch');
