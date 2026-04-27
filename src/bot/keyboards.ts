@@ -343,6 +343,14 @@ export function confirmKeyboard() {
   ]);
 }
 
+/** Post-launch keyboard: deep link to Trade panel + main menu. */
+export function postLaunchKeyboard(tokenId: string) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('💱 Open Trade Panel', `trade:open:${tokenId}`)],
+    [Markup.button.callback('🏠 Main menu', 'action:start')],
+  ]);
+}
+
 // ── Wizard navigation ──
 // Every step of the launch wizard needs (a) a way out (Menu) and (b) on steps
 // past the first, a way back to the previous prompt. Both scenes wire

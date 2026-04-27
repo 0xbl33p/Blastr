@@ -30,7 +30,21 @@ import { esc } from './format.js';
 import { logger } from '../logger.js';
 import { config } from '../config.js';
 
-const SOLANA_RPC = 'https://api.mainnet-beta.solana.com';
+const RPC_TIMEOUT_MS = 8_000;
+
+/** Wrap an awaitable so it can't hang the per-chat update queue. */
+function withTimeout<T>(p: Promise<T>, ms = RPC_TIMEOUT_MS): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`rpc timeout after ${ms}ms`)), ms),
+    ),
+  ]);
+}
+
+function solanaConn(): Connection {
+  return new Connection(config.solanaRpcUrl, 'confirmed');
+}
 
 // ── keyboards ──
 
@@ -95,12 +109,17 @@ export async function renderTradePanel(ctx: BotContext, tokenId: string): Promis
     return;
   }
 
-  const conn = new Connection(SOLANA_RPC, 'confirmed');
-  const balance = await getTelecoinBalance(
-    conn,
-    new PublicKey(svmWallet.address),
-    new PublicKey(record.swapContext.telecoinMint),
-  ).catch(() => 0n);
+  const conn = solanaConn();
+  const balance = await withTimeout(
+    getTelecoinBalance(
+      conn,
+      new PublicKey(svmWallet.address),
+      new PublicKey(record.swapContext.telecoinMint),
+    ),
+  ).catch((err) => {
+    logger.warn({ err, userId, tokenId }, 'balance lookup failed/timed out');
+    return 0n;
+  });
 
   const balanceStr = balance > 0n
     ? `${(Number(balance) / 1e9).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${esc(record.symbol ?? '')}`
@@ -182,7 +201,7 @@ async function executeSell(ctx: BotContext, tokenId: string, percent: number): P
   await cleanSend(ctx, `⏳ Selling ${percent}% of $${esc(record.symbol ?? '?')}...`);
 
   try {
-    const conn = new Connection(SOLANA_RPC, 'confirmed');
+    const conn = solanaConn();
     const owner = new PublicKey(svmWallet.address);
     const mint = new PublicKey(record.swapContext.telecoinMint);
 

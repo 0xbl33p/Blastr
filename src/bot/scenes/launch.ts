@@ -10,7 +10,6 @@ import { tokenStore } from '../../store/tokens.js';
 import { presetStore } from '../../store/presets.js';
 import { buildAutoStakeIxs, planAutoStake, renderAutoStakeStatus } from '../../printr/stake.js';
 import { extractSwapContext } from '../../printr/sell.js';
-import { renderTradePanel } from '../trade.js';
 import { Connection, PublicKey, type TransactionInstruction } from '@solana/web3.js';
 import {
   chainKeyboard,
@@ -18,6 +17,7 @@ import {
   confirmKeyboard,
   mainMenuKeyboard,
   walletRequiredKeyboard,
+  postLaunchKeyboard,
   advancedToggleKeyboard,
   maxSupplyKeyboard,
   supplyRatioKeyboard,
@@ -570,7 +570,7 @@ async function handleConfirm(ctx: BotContext) {
         if (stakePlan.willStake && svmPayload.mint && initialBuyAmt) {
           try {
             const toStake = (BigInt(initialBuyAmt) * 99n) / 100n; // 1% slippage buffer
-            const conn = new Connection('https://api.mainnet-beta.solana.com', 'confirmed');
+            const conn = new Connection(config.solanaRpcUrl, 'confirmed');
             stakeIxs = await buildAutoStakeIxs({
               payloadIxs: svmPayload.ixs,
               owner: new PublicKey(svmWallet.address),
@@ -598,10 +598,7 @@ async function handleConfirm(ctx: BotContext) {
             `<b>Signature:</b> <code>${svmResult.signature}</code>\n` +
             `<b>Status:</b> ${svmResult.confirmation_status}` +
             stakeOutcome,
-          mainMenuKeyboard(),
-        );
-        renderTradePanel(ctx, result.token_id).catch((err) =>
-          logger.warn({ err, userId, tokenId: result.token_id }, 'trade panel render failed'),
+          postLaunchKeyboard(result.token_id),
         );
         signed = true;
       } catch (err) {

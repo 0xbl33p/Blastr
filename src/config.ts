@@ -37,6 +37,11 @@ export const config = {
   // ── crypto ──
   walletEncryptionKey: process.env.WALLET_ENCRYPTION_KEY ?? '',
 
+  // ── solana rpc ──
+  // Defaults to the public mainnet-beta endpoint, which is heavily rate-limited.
+  // Set SOLANA_RPC_URL to a Helius/Triton/QuickNode URL in production.
+  solanaRpcUrl: process.env.SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com',
+
   // ── printr ──
   printrApiKey:
     process.env.PRINTR_API_KEY ||

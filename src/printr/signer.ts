@@ -102,7 +102,12 @@ export async function signAndSubmitEvm(
 
 // ── Solana signing ──
 
-const DEFAULT_SOLANA_RPC = 'https://api.mainnet-beta.solana.com';
+// We import lazily inside the function to avoid a circular dep on the config
+// module from this low-level signer.
+async function getDefaultRpcUrl(): Promise<string> {
+  const { config } = await import('../config.js');
+  return config.solanaRpcUrl;
+}
 
 export async function signAndSubmitSvm(
   payload: SvmPayload,
@@ -112,7 +117,7 @@ export async function signAndSubmitSvm(
   /** Extra instructions appended after Printr's payload (e.g., auto-stake). */
   extraIxs?: TransactionInstruction[],
 ): Promise<SvmSubmitResult> {
-  const rpc = rpcUrl || DEFAULT_SOLANA_RPC;
+  const rpc = rpcUrl || (await getDefaultRpcUrl());
   const connection = new Connection(rpc, 'confirmed');
 
   // Decode keypair from base58 (64 bytes: 32 secret + 32 public)
