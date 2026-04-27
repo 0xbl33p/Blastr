@@ -361,25 +361,47 @@ async function handleConfirm(ctx: BotContext) {
           stakeLockPeriod: launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod,
         });
         const initialBuyAmt = result.quote?.initial_buy_amount;
-        if (stakePlan.willStake && svmPayload.mint && initialBuyAmt) {
-          try {
-            const toStake = (BigInt(initialBuyAmt) * 99n) / 100n; // 1% slippage buffer
-            const conn = new Connection(config.solanaRpcUrl, 'confirmed');
-            const lockForLaunch = launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
-            stakeIxs = await buildAutoStakeIxs({
-              payloadIxs: svmPayload.ixs,
-              owner: new PublicKey(svmWallet.address),
-              telecoinMint: new PublicKey(svmPayload.mint),
-              toStakeAmount: toStake,
-              lockPeriod: lockForLaunch,
-              connection: conn,
-            });
-            stakeOutcome = `\n🔒 Auto-staked initial buy → ${lockForLaunch}d lock`;
-            logger.info({ userId, lock: lockForLaunch, toStake: toStake.toString() }, 'auto-stake ixs built (quickLaunch)');
-          } catch (err) {
-            logger.warn({ err, userId }, 'auto-stake ix build failed, proceeding without it');
-            stakeOutcome = `\n⚠️ Auto-stake skipped — build error. Stake manually on Printr.`;
-            stakeIxs = undefined;
+
+        logger.info(
+          {
+            userId,
+            willStake: stakePlan.willStake,
+            reason: stakePlan.reason,
+            hasMint: !!svmPayload.mint,
+            mintValue: svmPayload.mint,
+            hasInitialBuyAmt: !!initialBuyAmt,
+            initialBuyAmt,
+            payloadIxsCount: svmPayload.ixs?.length,
+            quoteKeys: result.quote ? Object.keys(result.quote) : [],
+            payloadKeys: Object.keys(svmPayload),
+          },
+          'auto-stake decision (quickLaunch)',
+        );
+
+        if (stakePlan.willStake) {
+          if (!svmPayload.mint || !initialBuyAmt) {
+            logger.warn({ userId, hasMint: !!svmPayload.mint, hasInitialBuyAmt: !!initialBuyAmt }, 'auto-stake plan ready but payload incomplete');
+            stakeOutcome = `\n⚠️ Auto-stake skipped — Printr payload missing required fields (mint or quote amount). Stake manually on Printr.`;
+          } else {
+            try {
+              const toStake = (BigInt(initialBuyAmt) * 99n) / 100n; // 1% slippage buffer
+              const conn = new Connection(config.solanaRpcUrl, 'confirmed');
+              const lockForLaunch = launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
+              stakeIxs = await buildAutoStakeIxs({
+                payloadIxs: svmPayload.ixs,
+                owner: new PublicKey(svmWallet.address),
+                telecoinMint: new PublicKey(svmPayload.mint),
+                toStakeAmount: toStake,
+                lockPeriod: lockForLaunch,
+                connection: conn,
+              });
+              stakeOutcome = `\n🔒 Auto-staked initial buy → ${lockForLaunch}d lock`;
+              logger.info({ userId, lock: lockForLaunch, toStake: toStake.toString() }, 'auto-stake ixs built (quickLaunch)');
+            } catch (err) {
+              logger.warn({ err, userId }, 'auto-stake ix build failed, proceeding without it');
+              stakeOutcome = `\n⚠️ Auto-stake skipped — build error. Stake manually on Printr.`;
+              stakeIxs = undefined;
+            }
           }
         } else if (preset.feeSink === 'stake_pool') {
           stakeOutcome = `\n${renderAutoStakeStatus(stakePlan)}`;
