@@ -509,6 +509,47 @@ async function handleConfirm(ctx: BotContext) {
     ? { spend_native: Math.floor(launch.initialBuySol! * LAMPORTS_PER_SOL).toString() }
     : { spend_native: '100000' };
 
+  // ── Pre-flight balance check ──
+  // print_telecoin2 internally wraps SOL for the initial buy and creates
+  // several Token-2022 accounts (mint, ATAs, dev_config). On top of that we
+  // prepend the blastr fee transfer and (when staking) append a
+  // stake_position PDA. If the wallet can't cover all of it the launch will
+  // revert with SPL Token Custom:1 (InsufficientFunds), but only AFTER
+  // Printr has reserved the ticker for 48h. Catch it here instead.
+  const launchTouchesSolana = chains.some((c) => c.startsWith('solana:'));
+  if (launchTouchesSolana && svmWallet) {
+    const willStakeForCheck = preset.autoStakeInitial && launch.feeSink === 'stake_pool' && (launch.initialBuySol ?? 0) > 0;
+    const initialBuyLamports = (launch.initialBuySol ?? 0) > 0
+      ? Math.floor((launch.initialBuySol ?? 0) * LAMPORTS_PER_SOL)
+      : 100_000;
+    const blastrFeeLamports = config.blastrFeeRecipientSvm && config.blastrFeeSol > 0
+      ? Math.round(config.blastrFeeSol * LAMPORTS_PER_SOL)
+      : 0;
+    const RENT_BUFFER_LAMPORTS = 15_000_000; // ~0.015 SOL: mint + ATAs + tx fees
+    const STAKE_RENT_LAMPORTS = willStakeForCheck ? 5_000_000 : 0; // ~0.005 SOL stake position
+    const requiredLamports = initialBuyLamports + blastrFeeLamports + RENT_BUFFER_LAMPORTS + STAKE_RENT_LAMPORTS;
+    try {
+      const conn = new Connection(config.solanaRpcUrl, 'confirmed');
+      const balance = await conn.getBalance(new PublicKey(svmWallet.address));
+      if (balance < requiredLamports) {
+        const need = (requiredLamports / LAMPORTS_PER_SOL).toFixed(4);
+        const have = (balance / LAMPORTS_PER_SOL).toFixed(4);
+        await cleanSend(
+          ctx,
+          `❌ <b>Insufficient SOL</b>\n\n` +
+            `Your balance: <b>${have} SOL</b>\n` +
+            `Required:     <b>≥${need} SOL</b>\n\n` +
+            `<i>Breakdown: ${(initialBuyLamports / LAMPORTS_PER_SOL).toFixed(3)} initial buy + ${(blastrFeeLamports / LAMPORTS_PER_SOL).toFixed(3)} blastr fee + ~${((RENT_BUFFER_LAMPORTS + STAKE_RENT_LAMPORTS) / LAMPORTS_PER_SOL).toFixed(3)} rents/fees${willStakeForCheck ? ' (incl. stake position)' : ''}.</i>\n\n` +
+            `Top up your wallet and try again. Ticker is still available — no Printr lock yet.`,
+          mainMenuKeyboard(),
+        );
+        return ctx.scene.leave();
+      }
+    } catch (err) {
+      logger.warn({ err, userId }, 'pre-flight balance check failed; proceeding anyway');
+    }
+  }
+
   await cleanSend(ctx, '⏳ Creating token on Printr...');
 
   try {

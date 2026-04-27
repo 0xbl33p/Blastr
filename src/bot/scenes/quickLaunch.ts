@@ -293,6 +293,40 @@ async function handleConfirm(ctx: BotContext) {
       ? { spend_native: Math.floor(preset.initialBuySol * LAMPORTS_PER_SOL).toString() }
       : { spend_native: '100000' };
 
+  // ── Pre-flight balance check ──  (see launch.ts for rationale)
+  if (chains.some((c) => c.startsWith('solana:')) && svmWallet) {
+    const willStakeForCheck = preset.autoStakeInitial && preset.feeSink === 'stake_pool' && preset.initialBuySol > 0;
+    const initialBuyLamports = preset.initialBuySol > 0
+      ? Math.floor(preset.initialBuySol * LAMPORTS_PER_SOL)
+      : 100_000;
+    const blastrFeeLamports = config.blastrFeeRecipientSvm && config.blastrFeeSol > 0
+      ? Math.round(config.blastrFeeSol * LAMPORTS_PER_SOL)
+      : 0;
+    const RENT_BUFFER_LAMPORTS = 15_000_000;
+    const STAKE_RENT_LAMPORTS = willStakeForCheck ? 5_000_000 : 0;
+    const requiredLamports = initialBuyLamports + blastrFeeLamports + RENT_BUFFER_LAMPORTS + STAKE_RENT_LAMPORTS;
+    try {
+      const conn = new Connection(config.solanaRpcUrl, 'confirmed');
+      const balance = await conn.getBalance(new PublicKey(svmWallet.address));
+      if (balance < requiredLamports) {
+        const need = (requiredLamports / LAMPORTS_PER_SOL).toFixed(4);
+        const have = (balance / LAMPORTS_PER_SOL).toFixed(4);
+        await cleanSend(
+          ctx,
+          `❌ <b>Insufficient SOL</b>\n\n` +
+            `Your balance: <b>${have} SOL</b>\n` +
+            `Required:     <b>≥${need} SOL</b>\n\n` +
+            `<i>Breakdown: ${(initialBuyLamports / LAMPORTS_PER_SOL).toFixed(3)} initial buy + ${(blastrFeeLamports / LAMPORTS_PER_SOL).toFixed(3)} blastr fee + ~${((RENT_BUFFER_LAMPORTS + STAKE_RENT_LAMPORTS) / LAMPORTS_PER_SOL).toFixed(3)} rents/fees${willStakeForCheck ? ' (incl. stake position)' : ''}.</i>\n\n` +
+            `Top up your wallet and try again. Ticker is still available — no Printr lock yet.`,
+          mainMenuKeyboard(),
+        );
+        return ctx.scene.leave();
+      }
+    } catch (err) {
+      logger.warn({ err, userId }, 'pre-flight balance check failed; proceeding anyway');
+    }
+  }
+
   await cleanSend(ctx, '⚡ Creating token on Printr...');
 
   try {
