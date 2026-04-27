@@ -492,9 +492,11 @@ async function handleConfirm(ctx: BotContext) {
   const userId = ctx.from!.id.toString();
   const launch = ctx.session.launch;
   const chains = launch.chains!;
-  const userWallets = await walletStore.getUserWallets(userId);
-  const evmWallet = userWallets.wallets.find((w) => w.type === 'evm');
-  const svmWallet = userWallets.wallets.find((w) => w.type === 'svm');
+  // Honor the user's "Set as Default" pick when they have multiple wallets
+  // of the same type — getWalletForType prefers is_default and falls back
+  // to the oldest of the requested type.
+  const evmWallet = await walletStore.getWalletForType(userId, 'evm');
+  const svmWallet = await walletStore.getWalletForType(userId, 'svm');
   const defaultWallet = await walletStore.getDefaultWallet(userId);
   const preset = await presetStore.get(userId);
 

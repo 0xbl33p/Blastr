@@ -105,7 +105,7 @@ export async function renderTradePanel(ctx: BotContext, tokenId: string): Promis
     return;
   }
 
-  const svmWallet = (await walletStore.getUserWallets(userId)).wallets.find((w) => w.type === 'svm');
+  const svmWallet = await walletStore.getWalletForType(userId, 'svm');
   if (!svmWallet) {
     await cleanSend(ctx, '⚠️ No Solana wallet found. Add one via /wallet.', mainMenuKeyboard());
     return;
@@ -194,7 +194,7 @@ async function executeSell(ctx: BotContext, tokenId: string, percent: number): P
     await cleanSend(ctx, '⚠️ Cannot build sell — missing swap context for this token.', mainMenuKeyboard());
     return;
   }
-  const svmWallet = (await walletStore.getUserWallets(userId)).wallets.find((w) => w.type === 'svm');
+  const svmWallet = await walletStore.getWalletForType(userId, 'svm');
   if (!svmWallet) {
     await cleanSend(ctx, '⚠️ No Solana wallet found.', mainMenuKeyboard());
     return;

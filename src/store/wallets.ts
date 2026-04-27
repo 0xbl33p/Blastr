@@ -104,6 +104,23 @@ class WalletStore {
     return row ? rowToWallet(row) : undefined;
   }
 
+  /** Pick the user's wallet for a given chain type. Prefers the user's
+   *  default wallet when its type matches; falls back to the oldest wallet
+   *  of that type. Without the is_default preference, callers using
+   *  `wallets.find(w => w.type === ...)` would always pick wallet #1
+   *  regardless of which one the user marked as default. */
+  async getWalletForType(userId: string, type: WalletType): Promise<StoredWallet | undefined> {
+    const [row] = await sql<WalletRow[]>`
+      SELECT id, short_id, user_id, label, type, address,
+             encrypted_key, iv, auth_tag, is_default, created_at
+      FROM wallets
+      WHERE user_id = ${userId} AND type = ${type}
+      ORDER BY is_default DESC, created_at ASC
+      LIMIT 1
+    `;
+    return row ? rowToWallet(row) : undefined;
+  }
+
   async addWallet(
     userId: string,
     type: WalletType,
