@@ -167,7 +167,14 @@ async function promptAmmFee(ctx: BotContext) {
   );
 }
 async function promptFeeSink(ctx: BotContext) {
-  await cleanSend(ctx, '🎯 <b>Fee sink</b>\n\nWhere collected fees route.', withNav(feeSinkKeyboard(), true));
+  await cleanSend(
+    ctx,
+    '🎯 <b>Fee sink</b> — where trading fees go:\n\n' +
+      '👤 <b>Creator</b> — fees stream to your wallet\n\n' +
+      '💎 <b>Proof of Belief</b> — fees fund a stake pool; holders stake to earn a share. <b>Required for auto-stake.</b>\n\n' +
+      '🔥 <b>Buyback &amp; burn</b> — fees auto-buy your token and burn it (deflationary)',
+    withNav(feeSinkKeyboard(), true),
+  );
 }
 
 // ── Step 0: Receive name, ask symbol ──

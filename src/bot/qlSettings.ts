@@ -200,7 +200,14 @@ async function openEditor(ctx: BotContext, field: string): Promise<boolean> {
       return true;
     case 'feeSink':
       ctx.session._qlSettingsEdit = false;
-      await cleanSend(ctx, '🎯 <b>Fee sink</b>\n\nWhere collected fees route.', qlFeeSinkKeyboard());
+      await cleanSend(
+        ctx,
+        '🎯 <b>Fee sink</b> — where trading fees go:\n\n' +
+          '👤 <b>Creator</b> — fees stream to your wallet\n\n' +
+          '💎 <b>Proof of Belief</b> — fees fund a stake pool; holders stake to earn a share. <b>Required for auto-stake.</b>\n\n' +
+          '🔥 <b>Buyback &amp; burn</b> — fees auto-buy your token and burn it (deflationary)',
+        qlFeeSinkKeyboard(),
+      );
       return true;
     case 'profile':
       ctx.session._qlSettingsEdit = false;
