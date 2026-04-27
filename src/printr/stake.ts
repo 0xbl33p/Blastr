@@ -375,11 +375,13 @@ export function renderAutoStakeStatus(plan: AutoStakePlan): string {
   }
   switch (plan.reason) {
     case 'no-stake-pool-fee-sink':
-      return ''; // Don't clutter when fee sink isn't stake_pool — irrelevant
+      // Surface that auto-stake is a stake_pool-only feature so devs who
+      // picked another fee sink know what they're opting out of.
+      return '🔒 <b>Auto-stake:</b> available when fee sink is 💎 Proof of Belief';
     case 'disabled-by-user':
       return '🔒 <b>Auto-stake:</b> off (enable in /settings)';
     case 'no-initial-buy':
-      return '🔒 <b>Auto-stake:</b> skipped — no initial buy (set Initial Buy in /settings)';
+      return '🔒 <b>Auto-stake:</b> skipped — requires initial buy &gt; 0';
     case 'no-solana-chain':
       return '🔒 <b>Auto-stake:</b> Solana-only (skipped)';
     default:

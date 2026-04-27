@@ -181,9 +181,11 @@ export async function signAndSubmitSvm(
   const tx = new VersionedTransaction(message);
   tx.sign([keypair]);
 
-  // Submit
+  // Submit. skipPreflight=true because Helius's standard tier rejects the
+  // preflight simulation request. Loses early validation but means the tx
+  // actually submits — failures surface during confirmation instead.
   const signature = await connection.sendRawTransaction(tx.serialize(), {
-    skipPreflight: false,
+    skipPreflight: true,
     preflightCommitment: 'confirmed',
   });
 

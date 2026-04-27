@@ -238,7 +238,8 @@ async function executeSell(ctx: BotContext, tokenId: string, percent: number): P
     tx.sign([keypair]);
 
     const sig = await conn.sendRawTransaction(tx.serialize(), {
-      skipPreflight: false,
+      // Helius standard tier rejects preflight — skip it.
+      skipPreflight: true,
       preflightCommitment: 'confirmed',
     });
     const confirmation = await conn.confirmTransaction(sig, 'confirmed');

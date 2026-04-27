@@ -39,7 +39,9 @@ const DEFAULTS = {
   supplyOnCurveBps: 7000,
   bondingCurveDevFeeBps: 100,
   ammDevFeeBps: 50,
-  feeSink: 'dev' as FeeSink,
+  // stake_pool by default so Quick path through /launch gets auto-stake too.
+  // Devs who explicitly want fees-to-creator pick Advanced and select 'dev'.
+  feeSink: 'stake_pool' as FeeSink,
 };
 import {
   formatQuote,
