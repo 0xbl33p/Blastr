@@ -334,12 +334,36 @@ export function qlProfileKeyboard() {
   ]);
 }
 
-export function confirmKeyboard() {
+export function confirmKeyboard(opts?: { stakeLockDays?: number }) {
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [];
+  if (opts?.stakeLockDays) {
+    rows.push([
+      Markup.button.callback(
+        `⏳ Stake lock: ${opts.stakeLockDays}d (tap to change)`,
+        'confirm:lockedit',
+      ),
+    ]);
+  }
+  rows.push([
+    Markup.button.callback('✅ Confirm & Launch', 'confirm:yes'),
+    Markup.button.callback('❌ Cancel', 'confirm:no'),
+  ]);
+  return Markup.inlineKeyboard(rows);
+}
+
+export function lockPeriodPickerKeyboard(current: number) {
+  const opts: [string, number][] = [
+    ['7d', 7], ['14d', 14], ['30d', 30],
+    ['60d', 60], ['90d', 90], ['180d', 180],
+  ];
   return Markup.inlineKeyboard([
-    [
-      Markup.button.callback('✅ Confirm & Launch', 'confirm:yes'),
-      Markup.button.callback('❌ Cancel', 'confirm:no'),
-    ],
+    opts.slice(0, 3).map(([l, d]) =>
+      Markup.button.callback(d === current ? `✅ ${l}` : l, `confirm:locksel:${d}`),
+    ),
+    opts.slice(3).map(([l, d]) =>
+      Markup.button.callback(d === current ? `✅ ${l}` : l, `confirm:locksel:${d}`),
+    ),
+    [Markup.button.callback('⬅️ Back', 'confirm:lockcancel')],
   ]);
 }
 

@@ -18,6 +18,7 @@ import {
   mainMenuKeyboard,
   walletRequiredKeyboard,
   postLaunchKeyboard,
+  lockPeriodPickerKeyboard,
   advancedToggleKeyboard,
   maxSupplyKeyboard,
   supplyRatioKeyboard,
@@ -449,26 +450,28 @@ async function showQuoteAndConfirm(ctx: BotContext) {
     blastrFeeLabel,
   });
 
-  // Auto-stake plan teaser. Pulls toggle/lock from preset since /launch
-  // wizard doesn't ask for them inline (Quick Launch Settings owns those).
+  // Auto-stake plan teaser. Pulls toggle/lock from preset; per-launch override
+  // (set via the "Stake lock" button on this confirm screen) wins when present.
   const userId = ctx.from!.id.toString();
   const preset = await presetStore.get(userId);
+  const effectiveLockPeriod = launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
   const stakePlan = planAutoStake({
     feeSink: launch.feeSink!,
     initialBuySol: launch.initialBuySol ?? 0,
     hasSolanaChain: hasSolana,
     autoStakeInitial: preset.autoStakeInitial,
-    stakeLockPeriod: preset.stakeLockPeriod,
+    stakeLockPeriod: effectiveLockPeriod,
   });
   const stakeStatusLine = renderAutoStakeStatus(stakePlan);
   const stakeBlock = stakeStatusLine ? `\n${stakeStatusLine}` : '';
+  const confirmKbOpts = stakePlan.willStake ? { stakeLockDays: effectiveLockPeriod } : undefined;
 
   try {
     const quote = await printr.quote(quoteBody);
-    await cleanSend(ctx, `${summary}\n\n${formatQuote(quote)}${stakeBlock}\n\n<b>Confirm launch?</b>`, confirmKeyboard());
+    await cleanSend(ctx, `${summary}\n\n${formatQuote(quote)}${stakeBlock}\n\n<b>Confirm launch?</b>`, confirmKeyboard(confirmKbOpts));
   } catch (err) {
     const msg = err instanceof PrintrApiError ? `API: ${err.detail}` : 'Could not fetch quote';
-    await cleanSend(ctx, `${summary}\n\n⚠️ ${esc(msg)}${stakeBlock}\n\n<b>Launch anyway?</b>`, confirmKeyboard());
+    await cleanSend(ctx, `${summary}\n\n⚠️ ${esc(msg)}${stakeBlock}\n\n<b>Launch anyway?</b>`, confirmKeyboard(confirmKbOpts));
   }
   return ctx.wizard.selectStep(14);
 }
@@ -573,23 +576,24 @@ async function handleConfirm(ctx: BotContext) {
           initialBuySol: launch.initialBuySol ?? 0,
           hasSolanaChain: hasSolana,
           autoStakeInitial: preset.autoStakeInitial,
-          stakeLockPeriod: preset.stakeLockPeriod,
+          stakeLockPeriod: launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod,
         });
         const initialBuyAmt = result.quote?.initial_buy_amount;
         if (stakePlan.willStake && svmPayload.mint && initialBuyAmt) {
           try {
             const toStake = (BigInt(initialBuyAmt) * 99n) / 100n; // 1% slippage buffer
             const conn = new Connection(config.solanaRpcUrl, 'confirmed');
+            const lockForLaunch = launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
             stakeIxs = await buildAutoStakeIxs({
               payloadIxs: svmPayload.ixs,
               owner: new PublicKey(svmWallet.address),
               telecoinMint: new PublicKey(svmPayload.mint),
               toStakeAmount: toStake,
-              lockPeriod: preset.stakeLockPeriod,
+              lockPeriod: lockForLaunch,
               connection: conn,
             });
-            stakeOutcome = `\n🔒 Auto-staked initial buy → ${preset.stakeLockPeriod}d lock`;
-            logger.info({ userId, lock: preset.stakeLockPeriod, toStake: toStake.toString() }, 'auto-stake ixs built (launch flow)');
+            stakeOutcome = `\n🔒 Auto-staked initial buy → ${lockForLaunch}d lock`;
+            logger.info({ userId, lock: lockForLaunch, toStake: toStake.toString() }, 'auto-stake ixs built (launch flow)');
           } catch (err) {
             logger.warn({ err, userId }, 'auto-stake ix build failed, proceeding without it');
             stakeOutcome = `\n⚠️ Auto-stake skipped — build error. Stake manually on Printr.`;
@@ -738,6 +742,42 @@ launchScene.command('wallet', async (ctx) => { await ctx.scene.leave(); return w
 launchScene.command('help', async (ctx) => { await ctx.scene.leave(); return helpCommand(ctx); });
 launchScene.command('quote', async (ctx) => { await ctx.scene.leave(); return quoteCommand(ctx); });
 launchScene.command('status', async (ctx) => { await ctx.scene.leave(); return statusCommand(ctx); });
+
+// ── Stake-lock override on the confirm screen ──
+// Lets the user change the auto-stake lock duration per-launch without
+// touching their saved preset.
+
+launchScene.action('confirm:lockedit', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const userId = ctx.from!.id.toString();
+  const preset = await presetStore.get(userId);
+  const current = ctx.session.launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
+  try {
+    await ctx.editMessageReplyMarkup(lockPeriodPickerKeyboard(current).reply_markup);
+  } catch {}
+});
+
+launchScene.action(/^confirm:locksel:/, async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const data = ctx.callbackQuery && 'data' in ctx.callbackQuery ? ctx.callbackQuery.data : '';
+  const days = parseInt(data.split(':')[2], 10);
+  const valid = [7, 14, 30, 60, 90, 180];
+  if (!valid.includes(days)) return;
+  ctx.session.launch.stakeLockPeriodOverride = days as (typeof valid)[number] as never;
+  try {
+    await ctx.editMessageReplyMarkup(confirmKeyboard({ stakeLockDays: days }).reply_markup);
+  } catch {}
+});
+
+launchScene.action('confirm:lockcancel', async (ctx) => {
+  await ctx.answerCbQuery().catch(() => {});
+  const userId = ctx.from!.id.toString();
+  const preset = await presetStore.get(userId);
+  const days = ctx.session.launch.stakeLockPeriodOverride ?? preset.stakeLockPeriod;
+  try {
+    await ctx.editMessageReplyMarkup(confirmKeyboard({ stakeLockDays: days }).reply_markup);
+  } catch {}
+});
 
 launchScene.action('action:wallet', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await ctx.scene.leave(); return walletDashboard(ctx); });
 launchScene.action('action:start', async (ctx) => { await ctx.answerCbQuery().catch(() => {}); await ctx.scene.leave(); return startCommand(ctx); });

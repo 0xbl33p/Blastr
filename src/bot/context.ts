@@ -1,7 +1,11 @@
 import { Context, Scenes } from 'telegraf';
 import type { ExternalLinks, FeeSink, MaxTelecoinSupply } from '../printr/types.js';
+import type { LockPeriodDays } from '../printr/stake.js';
 
 export interface LaunchState {
+  /** Per-launch override for the auto-stake lock period. Falls back to
+   *  preset.stakeLockPeriod when not set. */
+  stakeLockPeriodOverride?: LockPeriodDays;
   name: string;
   symbol: string;
   description: string;
