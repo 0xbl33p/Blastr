@@ -12,6 +12,7 @@ import {
 import bs58 from 'bs58';
 import { getChain } from './chains.js';
 import type { EvmPayload } from './types.js';
+import { logger } from '../logger.js';
 
 // ── blastr service fee transfer ──
 
@@ -195,7 +196,22 @@ export async function signAndSubmitSvm(
   // Confirm
   const confirmation = await connection.confirmTransaction(signature, 'confirmed');
   if (confirmation.value.err) {
-    throw new Error(`Transaction failed: ${JSON.stringify(confirmation.value.err)}`);
+    // Fetch the tx and log its program logs so we can decode Custom errors
+    // that the IDL doesn't define (e.g. SPL Token InsufficientFunds = 1).
+    let logsTail: string[] = [];
+    try {
+      const txDetails = await connection.getTransaction(signature, {
+        maxSupportedTransactionVersion: 0,
+      });
+      logsTail = (txDetails?.meta?.logMessages ?? []).slice(-40);
+    } catch (logErr) {
+      logger.warn({ err: logErr, signature }, 'failed to fetch tx logs for failed tx');
+    }
+    logger.error(
+      { signature, err: confirmation.value.err, logs: logsTail },
+      'svm tx failed — program log tail',
+    );
+    throw new Error(`Transaction failed (sig: ${signature}): ${JSON.stringify(confirmation.value.err)}`);
   }
 
   const status = await connection.getSignatureStatus(signature);
