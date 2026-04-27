@@ -42,7 +42,10 @@ export interface SvmInstruction {
 export interface SvmPayload {
   ixs: SvmInstruction[];
   lookup_table?: string;
-  mint?: string;
+  /** SPL mint address — Printr returns this as `mint_address`. */
+  mint_address?: string;
+  /** Optional payload integrity hash from Printr. */
+  hash?: string;
 }
 
 export interface SvmSubmitResult {

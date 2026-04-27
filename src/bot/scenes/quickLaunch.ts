@@ -325,8 +325,8 @@ async function handleConfirm(ctx: BotContext) {
     // later without re-querying Printr.
     const svmPayloadForCtx = payload as unknown as SvmPayload;
     const swapCtx =
-      svmPayloadForCtx.ixs && svmPayloadForCtx.mint
-        ? extractSwapContext(svmPayloadForCtx.ixs, svmPayloadForCtx.mint)
+      svmPayloadForCtx.ixs && svmPayloadForCtx.mint_address
+        ? extractSwapContext(svmPayloadForCtx.ixs, svmPayloadForCtx.mint_address)
         : null;
     void tokenStore
       .record(userId, result.token_id, launch.name!, launch.symbol!, chains, swapCtx)
@@ -367,8 +367,8 @@ async function handleConfirm(ctx: BotContext) {
             userId,
             willStake: stakePlan.willStake,
             reason: stakePlan.reason,
-            hasMint: !!svmPayload.mint,
-            mintValue: svmPayload.mint,
+            hasMint: !!svmPayload.mint_address,
+            mintValue: svmPayload.mint_address,
             hasInitialBuyAmt: !!initialBuyAmt,
             initialBuyAmt,
             payloadIxsCount: svmPayload.ixs?.length,
@@ -379,8 +379,8 @@ async function handleConfirm(ctx: BotContext) {
         );
 
         if (stakePlan.willStake) {
-          if (!svmPayload.mint || !initialBuyAmt) {
-            logger.warn({ userId, hasMint: !!svmPayload.mint, hasInitialBuyAmt: !!initialBuyAmt }, 'auto-stake plan ready but payload incomplete');
+          if (!svmPayload.mint_address || !initialBuyAmt) {
+            logger.warn({ userId, hasMint: !!svmPayload.mint_address, hasInitialBuyAmt: !!initialBuyAmt }, 'auto-stake plan ready but payload incomplete');
             stakeOutcome = `\n⚠️ Auto-stake skipped — Printr payload missing required fields (mint or quote amount). Stake manually on Printr.`;
           } else {
             try {
@@ -390,7 +390,7 @@ async function handleConfirm(ctx: BotContext) {
               stakeIxs = await buildAutoStakeIxs({
                 payloadIxs: svmPayload.ixs,
                 owner: new PublicKey(svmWallet.address),
-                telecoinMint: new PublicKey(svmPayload.mint),
+                telecoinMint: new PublicKey(svmPayload.mint_address),
                 toStakeAmount: toStake,
                 lockPeriod: lockForLaunch,
                 connection: conn,
