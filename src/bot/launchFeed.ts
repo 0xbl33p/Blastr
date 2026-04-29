@@ -16,6 +16,10 @@ export interface LaunchFeedPost {
   signature?: string;
   /** EVM tx hash, when this launch hit an EVM chain. */
   txHash?: string;
+  /** SPL mint address (Solana CA). Available immediately from the launch
+   *  payload. EVM contract addresses are only known after deployments
+   *  confirm, so we don't post EVM CAs in the feed. */
+  mintAddress?: string;
   stakePlan?: AutoStakePlan;
   /** Printr app base URL — typically `${config.printrBaseUrl}` rewritten from api-preview to app. */
   appUrl: string;
@@ -70,6 +74,11 @@ function formatCaption(post: LaunchFeedPost): string {
     `<b>${esc(post.name)}</b> (${esc(post.symbol)})`,
     `<b>Chain:</b> ${chainNames}`,
   ];
+
+  if (post.mintAddress) {
+    // <code> is tap-to-copy on Telegram mobile clients.
+    lines.push(`🪙 <b>CA:</b> <code>${esc(post.mintAddress)}</code>`);
+  }
 
   if (post.stakePlan?.willStake) {
     lines.push(`🔒 First staker · ${post.stakePlan.lockPeriod}d lock`);

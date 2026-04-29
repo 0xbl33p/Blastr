@@ -378,6 +378,7 @@ async function handleConfirm(ctx: BotContext) {
     // submit success — never on signing failures or aborted auto-stake.
     let publishSig: string | undefined;
     let publishHash: string | undefined;
+    let publishMint: string | undefined;
     let publishStakePlan: AutoStakePlan | undefined;
 
     if (hasSolana && svmWallet && (payload as unknown as SvmPayload).ixs) {
@@ -480,6 +481,7 @@ async function handleConfirm(ctx: BotContext) {
         const svmResult = await signAndSubmitSvm(svmPayload, key, undefined, svmFee, stakeIxs);
         publishSig = svmResult.signature;
         publishStakePlan = stakePlan;
+        if (svmPayload.mint_address) publishMint = normalizeMint(svmPayload.mint_address);
         const successMsg =
           `${tokenMsg}\n\n<b>📡 Transaction Submitted</b>\n` +
           `<b>Signature:</b> <code>${svmResult.signature}</code>\n` +
@@ -535,6 +537,7 @@ async function handleConfirm(ctx: BotContext) {
         imageBase64: launch.image || undefined,
         signature: publishSig,
         txHash: publishHash,
+        mintAddress: publishMint,
         stakePlan: publishStakePlan,
         appUrl,
       });
